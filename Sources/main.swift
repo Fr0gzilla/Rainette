@@ -303,7 +303,11 @@ final class Etat: ObservableObject {
 
     func rafraichirCours() async {
         defer { majEtatsWeb() }
-        guard let c = edt, let lu = await c.session({ await c.lireCours() }), let lus = lu else { return }
+        guard let c = edt else { return }
+        let lu = await c.session({ await c.lireCours() })
+        // Page prête mais sans les séances, ou jamais prête alors qu'on est connecté : lecture cassée.
+        signalerCasse(c.nom, c.lectureCassee || (lu != nil && lu! == nil))
+        guard let l = lu, let lus = l else { return }
         if lus != cours { cours = lus; EmploiDuTemps.memoriser(lus) }
         journal("Emploi du temps : \(lus.count) séances lues")
     }
@@ -369,6 +373,18 @@ final class Etat: ObservableObject {
     }
 
     @Published var teamsNonLus = 0
+    /// Pages connectées mais illisibles (leur interface a sans doute changé).
+    @Published var lecturesCassees: [String] = []
+    func signalerCasse(_ nom: String, _ cassee: Bool) {
+        let avant = lecturesCassees.contains(nom)
+        if cassee && !avant {
+            lecturesCassees.append(nom)
+            journal("⚠️ \(nom) : connecté mais illisible, la page a sans doute changé")
+        } else if !cassee && avant {
+            lecturesCassees.removeAll { $0 == nom }
+            journal("\(nom) : de nouveau lisible")
+        }
+    }
     /// Les seules personnes dont Rainette lit les messages Teams.
     var contactsTeams: [String] { Reglages.actuels.contactsTeams }
 
@@ -388,14 +404,19 @@ final class Etat: ObservableObject {
 
     /// Lit Outlook puis Teams, l'un après l'autre (une seule page ouverte à la fois).
     func lirePagesWeb() async {
-        if let e = ecole, let r = await e.session({
-            await e.nonLusOutlook(compte: Reglages.actuels.compteMicrosoft ?? "", premierId: 101)
-        }) { mailsOutlook = r }
+        if let e = ecole {
+            if let r = await e.session({
+                await e.nonLusOutlook(compte: Reglages.actuels.compteMicrosoft ?? "", premierId: 101)
+            }) { mailsOutlook = r }
+            signalerCasse("Outlook", e.lectureCassee || (e.dernierEtat == .connecte && e.lignesLues == 0))
+        }
         if let t = teams, let r = await t.session({
             // La liste d'abord : le compteur du titre n'apparaît qu'une fois Teams bien chargé.
             let messages = await t.messagesTeams(de: contactsTeams, premierId: 201)
             return (await t.nonLusTeams(), messages)
         }) { teamsNonLus = r.0; mailsTeams = r.1 }
+        if let t = teams { signalerCasse("Teams", t.lectureCassee || (t.dernierEtat == .connecte && t.lignesLues == 0)) }
+        if let t = teams, !t.preuves.isEmpty { t.preuves.forEach { journal($0) }; t.preuves = [] }
         journal("Teams : \(teamsNonLus) non lus, \(mailsTeams.count) message(s) de tes contacts · \(teams?.diagnostic ?? "")")
         majEtatsWeb()
     }
@@ -853,6 +874,10 @@ struct Widget: View {
 
     @ViewBuilder
     private var connexions: some View {
+        ForEach(e.lecturesCassees, id: \.self) { nom in
+            Label("\(nom) : la page a changé, j'arrive plus à la lire.", systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 12)).foregroundStyle(.orange)
+        }
         if e.teamsNonLus > 0 {
             Button { e.teams?.afficher(pourConnexion: false) } label: {
                 HStack(spacing: 8) {

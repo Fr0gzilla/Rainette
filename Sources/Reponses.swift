@@ -59,6 +59,7 @@ enum Repondeur {
         set mid to item 1 of argv
         set corps to item 2 of argv
         set ouvrir to (item 3 of argv) is "1"
+        set essai to (item 3 of argv) is "essai"
         tell application "Mail"
             set cible to missing value
             repeat with c in every account
@@ -71,13 +72,40 @@ enum Repondeur {
                 end try
             end repeat
             if cible is missing value then error "mail introuvable"
+            -- Le mail d'origine, cité sous la réponse (« Le …, X a écrit : » puis chaque ligne précédée de « > »).
+            set origine to ""
+            try
+                set origine to content of cible
+            end try
+            -- Sans les images (caractère « ￼ ») ni les lignes vides en série.
+            set AppleScript's text item delimiters to (character id 65532)
+            set morceaux to text items of origine
+            set AppleScript's text item delimiters to ""
+            set origine to morceaux as text
+            set cite to ""
+            set videAvant to true
+            repeat with ligne in paragraphs of origine
+                set l to ligne as text
+                set vide to (l is "") or (l is " ") or (l is "  ")
+                if not (vide and videAvant) then set cite to cite & "> " & l & return
+                set videAvant to vide
+            end repeat
+            set entete to "Le " & (date received of cible as text) & ", " & (sender of cible) & " a écrit :"
+            set texte to corps & return & return & entete & return & cite
             if ouvrir then
                 set r to reply cible with opening window
-                set content of r to corps
+                set content of r to texte
                 activate
+            else if essai then
+                -- Essai à blanc : on prépare la réponse, on renvoie ce qui serait envoyé, et on la jette.
+                set r to reply cible without opening window
+                set content of r to texte
+                set resultat to (subject of r) & linefeed & (address of item 1 of to recipients of r) & linefeed & (content of r)
+                close r saving no
+                return resultat
             else
                 set r to reply cible without opening window
-                set content of r to corps
+                set content of r to texte
                 send r
                 set read status of cible to true
             end if
