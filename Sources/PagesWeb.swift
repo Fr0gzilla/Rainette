@@ -279,10 +279,26 @@ final class PageWeb: NSObject, WKNavigationDelegate, NSWindowDelegate {
     static func age(_ t: String) -> Int? {
         let cal = Calendar.current, maintenant = Date()
         func ecart(_ d: Date?) -> Int? { d.map { max(0, Int(maintenant.timeIntervalSince($0))) } }
-        if let g = groupes(t, #"(\d{1,2}):(\d{2})"#) {
-            return ecart(cal.date(bySettingHour: Int(g[0])!, minute: Int(g[1])!, second: 0, of: maintenant))
+        if let g = groupes(t, #"(\d{1,2}):(\d{2})"#),
+           var d = cal.date(bySettingHour: Int(g[0])!, minute: Int(g[1])!, second: 0, of: maintenant) {
+            // Une heure pas encore passée aujourd'hui, c'est la veille (juste après minuit).
+            if d > maintenant { d = cal.date(byAdding: .day, value: -1, to: d) ?? d }
+            return ecart(d)
         }
         if t.hasPrefix("Hier") { return ecart(cal.date(byAdding: .hour, value: -24, to: maintenant)) }
+        // Jour de la semaine seul (« jeu. », « Mercredi », « mer. 14:05 ») : le plus récent passé.
+        let jours = ["dim", "lun", "mar", "mer", "jeu", "ven", "sam"]
+        let debut = String(t.lowercased().prefix(3))
+        // Seulement de vrais noms de jours (abrégés ou complets) : « Martin » ou « Samuel » ne sont pas des dates.
+        let motif = #"(?i)(?:dim(?:anche)?|lun(?:di)?|mar(?:di)?|mer(?:credi)?|jeu(?:di)?|ven(?:dredi)?|sam(?:edi)?)\.?(?:\s+\d{1,2}:\d{2})?"#
+        if let j = jours.firstIndex(of: debut), PageWeb.groupes(t, motif) != nil {
+            var d = cal.startOfDay(for: maintenant)
+            for _ in 0..<7 where cal.component(.weekday, from: d) != j + 1 {
+                d = cal.date(byAdding: .day, value: -1, to: d)!
+            }
+            if d == cal.startOfDay(for: maintenant) { d = cal.date(byAdding: .day, value: -7, to: d)! }
+            return ecart(cal.date(byAdding: .hour, value: 12, to: d))
+        }
         if let g = groupes(t, #"(?:\p{L}{3}\.?\s+)?(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?"#) {
             var c = cal.dateComponents([.year], from: maintenant)
             c.day = Int(g[0]); c.month = Int(g[1]); c.hour = 12

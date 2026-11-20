@@ -380,7 +380,9 @@ final class Etat: ObservableObject {
         let f = dossier.appendingPathComponent("journal.txt")
         var ancien = (try? String(contentsOf: f, encoding: .utf8)) ?? ""
         if ancien.count > 20000 { ancien = String(ancien.suffix(10000)) }
-        let ligne = "\(ISO8601DateFormatter().string(from: Date())) \(t)\n"
+        let heure = DateFormatter()
+        heure.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let ligne = "\(heure.string(from: Date())) \(t)\n"
         try? (ancien + ligne).write(to: f, atomically: true, encoding: .utf8)
     }
 
@@ -402,6 +404,7 @@ final class Etat: ObservableObject {
 
     /// Calendrier tout de suite, mails en arrière-plan.
     func rafraichirTout() {
+        if Demo.active { return }   // démo : jamais de vraies données
         rafraichir()
         Task {
             guard Mer.active else { return }
