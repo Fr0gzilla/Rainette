@@ -132,19 +132,15 @@ struct CarteReponse: View {
                         .font(.system(size: 13))
                         .scrollContentBackground(.hidden)
                         .padding(6)
-                        .frame(minHeight: 110, maxHeight: 220)
+                        .frame(height: hauteurTexte(r.texte))
                         .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.25)))
-                    HStack(spacing: 8) {
-                        Button { e.envoyerReponse(ouvrir: false) } label: { Text("Envoie").frame(minWidth: 64) }
-                            .buttonStyle(.borderedProminent).tint(or).disabled(r.envoi)
-                        Button("Ouvre dans Mail") { e.envoyerReponse(ouvrir: true) }
-                            .buttonStyle(.bordered).disabled(r.envoi)
-                        Button(r.ton == .formel ? "Plus tranquille" : "Plus formel") {
-                            e.choisirTon(r.ton == .formel ? .tranquille : .formel)
+                    // Sur une ligne si ça tient, sinon sur deux : jamais de bouton coupé.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) { boutonsPrincipaux(r); boutonsSecondaires(r) }
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 8) { boutonsPrincipaux(r) }
+                            HStack(spacing: 8) { boutonsSecondaires(r) }
                         }
-                        .buttonStyle(.bordered).disabled(r.envoi)
-                        Spacer(minLength: 0)
-                        Button("Laisse tomber") { e.annulerReponse() }.buttonStyle(.bordered).disabled(r.envoi)
                     }
                     Text("Tu peux retoucher le texte avant d'envoyer.").font(.system(size: 11)).foregroundStyle(.tertiary)
                 }
@@ -153,5 +149,29 @@ struct CarteReponse: View {
             .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(or.opacity(0.08)))
             .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(or.opacity(0.3), lineWidth: 1))
         }
+    }
+
+    @ViewBuilder
+    private func boutonsPrincipaux(_ r: ReponseMail) -> some View {
+        Button { e.envoyerReponse(ouvrir: false) } label: { Text("Envoie").frame(minWidth: 64) }
+            .buttonStyle(.borderedProminent).tint(or).disabled(r.envoi).fixedSize()
+        Button("Ouvre dans Mail") { e.envoyerReponse(ouvrir: true) }
+            .buttonStyle(.bordered).disabled(r.envoi).fixedSize()
+    }
+
+    @ViewBuilder
+    private func boutonsSecondaires(_ r: ReponseMail) -> some View {
+        Button(r.ton == .formel ? "Plus tranquille" : "Plus formel") {
+            e.choisirTon(r.ton == .formel ? .tranquille : .formel)
+        }
+        .buttonStyle(.bordered).disabled(r.envoi).fixedSize()
+        Button("Laisse tomber") { e.annulerReponse() }.buttonStyle(.bordered).disabled(r.envoi).fixedSize()
+    }
+
+    /// Hauteur de la zone de texte : assez pour tout voir (signature comprise), entre 90 et 220 pt.
+    private func hauteurTexte(_ t: String) -> CGFloat {
+        let lignes = t.split(separator: "\n", omittingEmptySubsequences: false)
+            .reduce(0) { $0 + max(1, Int((Double($1.count) / 50).rounded(.up))) }
+        return min(max(CGFloat(lignes) * 17 + 18, 90), 220)
     }
 }

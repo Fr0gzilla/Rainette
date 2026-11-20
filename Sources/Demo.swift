@@ -70,9 +70,14 @@ extension Etat {
         // Un petit échange dans la discussion
         if CommandLine.arguments.contains("--demo-discussion") {
             bulles = [
-                Bulle(deMoi: true, texte: "j'ai quoi demain ?"),
-                Bulle(deMoi: false, texte: "Bases de données à 9h, anglais à distance à 13h30, et dentiste à 17h. Grosse journée 😅"),
+                Bulle(deMoi: true, texte: "réponds a studio nova que cest ok pour mardi 10h merci"),
+                Bulle(deMoi: false, texte: "Ok, je réponds à Studio Nova. Tu la veux formelle ou tranquille ?"),
             ]
+            var r = ReponseMail(mail: importantsDemo[0].0, brouillon: "cest ok pour mardi 10h merci")
+            r.ton = .formel
+            r.texte = "Bonjour,\n\nJe vous confirme ma présence pour l'entretien d'alternance de mardi à 10h. "
+                + "Merci beaucoup pour votre proposition.\n\nCordialement,\nCamille Martin"
+            reponse = r
         }
     }
 }
