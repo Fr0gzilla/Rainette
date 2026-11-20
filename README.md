@@ -2,6 +2,10 @@
 
 Rainette, c'est un petit widget que j'ai fait pour mon bureau Mac. Le matin, j'ouvre mon ordi et j'ai tout au même endroit : les mails qui comptent vraiment, ce que j'ai à faire, mes cours du jour et de demain, et si ça vaut le coup d'aller sur l'eau.
 
+<p align="center">
+  <img src="docs/apercu.png" alt="Aperçu du widget Rainette" width="380">
+</p>
+
 Je voulais quelque chose qui trie mes mails à ma place sans les envoyer à un service en ligne. Du coup, toute la partie IA tourne en local avec [Ollama](https://ollama.com). Rien ne sort du Mac à part les requêtes vers mes propres comptes et vers la météo.
 
 ## Ce qu'elle sait faire
@@ -42,6 +46,12 @@ Au premier lancement, macOS demande l'accès au calendrier et l'autorisation de 
 Petite astuce : sans certificat de signature, macOS peut redemander ces autorisations après chaque compilation. Si tu crées un certificat auto-signé nommé « Rainette (local) » dans ton trousseau, `build.sh` l'utilise et le problème disparaît.
 
 Pour la lancer à l'ouverture de session, le plus simple est un LaunchAgent qui fait `open` sur `build/Rainette.app` avec `RunAtLoad`.
+
+Pour voir à quoi elle ressemble sans rien brancher, lance-la avec des données inventées (c'est ce mode qui a servi pour l'image du dessus) :
+
+```sh
+build/Rainette.app/Contents/MacOS/Rainette --demo
+```
 
 ## La régler
 

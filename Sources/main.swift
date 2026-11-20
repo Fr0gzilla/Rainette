@@ -685,6 +685,7 @@ struct Verre: NSViewRepresentable {
 struct Widget: View {
     @ObservedObject var e: Etat
     @State private var saisie = ""
+    @State private var hBulles: CGFloat = 80
     @FocusState private var focus: Bool
     private let horloge = Timer.publish(every: 1800, on: .main, in: .common).autoconnect()
 
@@ -1041,8 +1042,10 @@ struct Widget: View {
                             }
                         }
                         .padding(.vertical, 2)
+                        .mesure { hBulles = $0 }
                     }
-                    .frame(maxHeight: 240)
+                    // Juste la hauteur des messages (240 au plus) : le reste de la place va au milieu du widget.
+                    .frame(height: min(max(hBulles, 40), 240))
                     .onChange(of: e.bulles.count) { _, _ in
                         if let d = e.bulles.last { withAnimation { lecteur.scrollTo(d.id, anchor: .bottom) } }
                     }
@@ -1163,6 +1166,15 @@ final class Delegue: NSObject, NSApplicationDelegate {
         fenetre = w
         fenetreWidget = w
         gardien = GardienBureau(fenetre: w)
+        if Demo.active {
+            // Démo : données inventées, taille fixe, rien de réel n'est lu ni enregistré.
+            if let v = NSScreen.main?.visibleFrame {
+                w.setFrame(NSRect(x: v.maxX - 476, y: v.minY + 16, width: 460, height: v.height - 32), display: true)
+            }
+            w.orderFront(nil)
+            etat.remplirDemo()
+            return
+        }
         w.gardien = gardien
         w.placer()
         w.orderFront(nil)
