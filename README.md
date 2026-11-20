@@ -116,3 +116,7 @@ Pour Outlook, Teams et l'emploi du temps, clique sur le bouton « Brancher » qu
 | `Sources/Disposition.swift` | Place, taille et aimantation du widget |
 | `Sources/Bureau.swift` | Fichiers du bureau poussés hors du widget |
 | `Sources/Reglages.swift` | Lecture des réglages personnels |
+
+## Licence
+
+[MIT](LICENSE) © 2026 Fr0gzilla
