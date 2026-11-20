@@ -1,0 +1,15 @@
+{
+  "prenom": "Camille",
+  "nomComplet": "Camille Martin",
+  "profil": "un étudiant en informatique qui cherche une alternance",
+  "comptesMail": ["camille.martin@exemple.fr"],
+  "compteMicrosoft": "camille.martin@mon-ecole.fr",
+  "outlook": true,
+  "teams": true,
+  "contactsTeams": ["Alex Durand", "Sam Petit"],
+  "emploiDuTemps": { "nom": "Cours", "adresse": "https://mon-ecole.exemple.fr/emploi-du-temps" },
+  "mer": {
+    "navigation": { "nom": "Ma plage", "vent": [47.50, -3.00], "mer": [47.45, -3.00] },
+    "surf": { "nom": "Mon spot", "vent": [47.40, -3.10], "mer": [47.40, -3.15] }
+  }
+}

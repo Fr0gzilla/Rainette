@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key><string>com.fr0gzilla.rainette</string>
+	<key>CFBundleName</key><string>Rainette</string>
+	<key>CFBundleDisplayName</key><string>Rainette</string>
+	<key>CFBundleExecutable</key><string>Rainette</string>
+	<key>CFBundlePackageType</key><string>APPL</string>
+	<key>CFBundleShortVersionString</key><string>0.1</string>
+	<key>CFBundleVersion</key><string>1</string>
+	<key>LSMinimumSystemVersion</key><string>14.0</string>
+	<key>LSUIElement</key><true/>
+	<key>NSCalendarsFullAccessUsageDescription</key><string>Rainette affiche ton agenda et y ajoute les évènements que tu lui demandes.</string>
+	<key>NSCalendarsUsageDescription</key><string>Rainette affiche ton agenda et y ajoute les évènements que tu lui demandes.</string>
+	<key>NSAppleEventsUsageDescription</key><string>Rainette lit tes nouveaux mails dans Mail pour te les résumer.</string>
+	<key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+</dict>
+</plist>
