@@ -1,32 +1,32 @@
-# 🐸 Rainette
+# Rainette 🐸
 
-Un widget de bureau pour macOS qui fait le point de ta journée : mails importants, agenda, cours, messages Teams et conditions en mer. Avec une IA **100 % locale** (Ollama) à qui tu parles comme à un pote.
+Rainette, c'est un petit widget que j'ai fait pour mon bureau Mac. Le matin, j'ouvre mon ordi et j'ai tout au même endroit : les mails qui comptent vraiment, ce que j'ai à faire, mes cours du jour et de demain, et si ça vaut le coup d'aller sur l'eau.
 
-Rien ne part sur un serveur d'IA : le tri des mails, les résumés et la discussion tournent sur ton Mac.
+Je voulais quelque chose qui trie mes mails à ma place sans les envoyer à un service en ligne. Du coup, toute la partie IA tourne en local avec [Ollama](https://ollama.com). Rien ne sort du Mac à part les requêtes vers mes propres comptes et vers la météo.
 
-## Ce qu'elle fait
+## Ce qu'elle sait faire
 
-- **Mails** : lit les non-lus des dernières 72 h dans l'app Mail (et dans Outlook web si tu as un compte Microsoft 365), garde les importants, les résume en une phrase et en tire une liste « À faire » à cocher. Seuls les nouveaux mails passent par l'IA : les verdicts sont mémorisés.
-- **Répondre à un mail** : tu dis en vrac ce que tu veux répondre, Rainette te demande le ton (formel ou tranquille), reformule, corrige, et tu relis avant d'envoyer. Rien ne part sans ton clic.
-- **Agenda** : tes évènements d'aujourd'hui et de demain (calendrier Apple). Tu peux lui demander d'en ajouter (« mets foot jeudi 18h ») : elle te montre l'évènement et attend ta confirmation.
-- **Cours** : ton emploi du temps, lu sur une plateforme d'école **Pepal** (connexion Microsoft), mêlé à ton agenda.
-- **Teams** : le nombre de messages non lus, et le dernier message de quelques personnes choisies. Lecture discrète : rien n'est marqué comme lu.
-- **Mer** : pour un spot de navigation (catamaran, voile) et un spot de surf, un avis du moment (« Top », « Pétole », « Trop gros »…) et le meilleur créneau à venir, via [Open-Meteo](https://open-meteo.com) (gratuit, sans clé).
-- **Widget** : collé au bureau, sous les fenêtres. Il se déplace et se redimensionne depuis son menu, en s'aimantant aux bords de l'écran et aux widgets macOS. Les fichiers posés sur le bureau sont poussés hors de sa zone.
+Elle lit mes mails non lus des trois derniers jours, met de côté les pubs et les newsletters, et me résume le reste en une phrase. Quand un mail demande quelque chose, ça finit dans une petite liste « À faire » que je coche au fur et à mesure.
 
-## Prérequis
+Je peux aussi lui parler dans la barre du bas. Je lui demande ce que j'ai demain, je lui dis « mets foot jeudi 18h » et elle me propose l'évènement avant de l'ajouter. Pour répondre à un mail, je lui écris vite fait ce que je veux dire, elle me demande si je la veux formelle ou tranquille, et elle me le remet au propre. Rien ne part tant que je n'ai pas cliqué.
 
-- macOS 14 ou plus récent, Mac Apple Silicon.
-- Les outils en ligne de commande d'Apple (`xcode-select --install`). Xcode n'est pas nécessaire.
-- [Ollama](https://ollama.com) avec le modèle `qwen3.5:9b` :
+Pour l'école, elle va chercher mon emploi du temps sur la plateforme de l'école (une plateforme Pepal) et mes mails dans Outlook web. Elle me dit aussi combien de messages j'ai sur Teams et me montre ceux de quelques personnes que j'ai choisies, sans les marquer comme lus.
 
-  ```sh
-  brew install ollama
-  brew services start ollama
-  ollama pull qwen3.5:9b
-  ```
+Il y a aussi un coin pour la mer : pour un spot de voile et un spot de surf, elle affiche les conditions du moment, avec les données gratuites d'[Open-Meteo](https://open-meteo.com) : « Top », « Pétole », « Trop gros »… avec le meilleur créneau si ce n'est pas le bon moment.
 
-## Installation
+Le widget reste collé au bureau, sous les fenêtres. On peut le déplacer et le redimensionner depuis son menu, et il s'aligne tout seul sur les widgets de macOS.
+
+## L'installer
+
+Il faut un Mac Apple Silicon sous macOS 14 ou plus, les outils en ligne de commande d'Apple (`xcode-select --install`, pas besoin de Xcode) et Ollama avec le modèle `qwen3.5:9b` :
+
+```sh
+brew install ollama
+brew services start ollama
+ollama pull qwen3.5:9b
+```
+
+Ensuite :
 
 ```sh
 git clone https://github.com/Fr0gzilla/Rainette.git
@@ -35,87 +35,37 @@ cd Rainette
 open build/Rainette.app
 ```
 
-`build.sh` compile avec le SDK indiqué dans le script : adapte le chemin `MacOSX26.5.sdk` à celui présent dans `/Library/Developer/CommandLineTools/SDKs/` si besoin.
+Si la compilation échoue, vérifie le SDK indiqué dans `build.sh` : il doit correspondre à celui que tu as dans `/Library/Developer/CommandLineTools/SDKs/`.
 
-Au premier lancement, macOS demande l'accès au calendrier, puis l'autorisation de piloter Mail (et le Finder, pour pousser les fichiers du bureau).
+Au premier lancement, macOS demande l'accès au calendrier et l'autorisation de piloter Mail et le Finder (le Finder sert juste à pousser les fichiers du bureau qui se retrouveraient sous le widget).
 
-### Garder les autorisations entre deux compilations (facultatif)
+Petite astuce : sans certificat de signature, macOS peut redemander ces autorisations après chaque compilation. Si tu crées un certificat auto-signé nommé « Rainette (local) » dans ton trousseau, `build.sh` l'utilise et le problème disparaît.
 
-Sans certificat, l'app est signée « à la volée » et macOS peut redemander les autorisations après chaque compilation. Si un certificat de signature nommé **« Rainette (local) »** existe dans ton trousseau, `build.sh` l'utilise et l'identité de l'app reste stable. Un certificat auto-signé suffit (usage : signature de code).
+Pour la lancer à l'ouverture de session, le plus simple est un LaunchAgent qui fait `open` sur `build/Rainette.app` avec `RunAtLoad`.
 
-### Lancer Rainette à l'ouverture de session (facultatif)
+## La régler
 
-Crée `~/Library/LaunchAgents/com.exemple.rainette.plist` en remplaçant le chemin :
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>com.exemple.rainette</string>
-  <key>ProgramArguments</key><array>
-    <string>/usr/bin/open</string><string>/chemin/vers/Rainette/build/Rainette.app</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-</dict></plist>
-```
-
-puis `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.exemple.rainette.plist`.
-
-## Réglages
-
-Tout ce qui est personnel (nom, adresses, contacts, école, spots) est dans un fichier qui reste sur ton Mac :
+Tout ce qui est perso (nom, adresses, contacts, école, spots) se met dans un fichier à part, qui reste sur ton Mac :
 
 ```
 ~/Library/Application Support/Rainette/reglages.json
 ```
 
-Copie [`reglages.exemple.json`](reglages.exemple.json) à cet endroit et adapte-le, puis relance Rainette. Tout est facultatif : une partie sans réglage est simplement masquée.
+Le plus simple est de partir de [`reglages.exemple.json`](reglages.exemple.json) et de remplacer les valeurs. Tu n'es pas obligé de tout remplir : ce qui n'est pas réglé n'apparaît pas.
 
-| Clé | Rôle |
-|---|---|
-| `prenom`, `nomComplet` | Pour que l'IA s'adresse à toi et signe tes réponses (formelles : nom complet, tranquilles : prénom). |
-| `profil` | Qui tu es en une phrase : aide l'IA à juger ce qui est important. |
-| `comptesMail` | Comptes de l'app Mail à lire. Liste vide = tous les comptes actifs. |
-| `compteMicrosoft` | Compte Microsoft 365 (école, travail) pour Outlook web, Teams web et la connexion à l'emploi du temps. |
-| `outlook`, `teams` | Activer ou non chacun des deux. |
-| `contactsTeams` | Les seules personnes dont Rainette lit les messages Teams. |
-| `emploiDuTemps` | `nom` affiché et `adresse` de la page d'emploi du temps (plateforme Pepal). |
-| `mer` | `navigation` et `surf` : un nom, et deux points `[latitude, longitude]` (le vent près de la plage, la houle un peu au large). |
+- `prenom` et `nomComplet` servent à signer tes réponses, et `profil` aide l'IA à savoir ce qui est important pour toi.
+- `comptesMail` liste les comptes de l'app Mail à lire (vide = tous).
+- `compteMicrosoft` active Outlook, Teams et la connexion à l'emploi du temps. `contactsTeams` dit de qui lire les messages.
+- `emploiDuTemps` prend l'adresse de la page d'emploi du temps.
+- `mer` prend deux spots, chacun avec un point pour le vent (près de la plage) et un pour la houle (un peu au large).
 
-Pour Outlook, Teams et l'emploi du temps, clique sur le bouton « Brancher » qui apparaît dans le widget et connecte-toi une fois. Rainette garde la session et ouvre ces pages en arrière-plan seulement le temps de les lire.
+Pour Outlook, Teams et l'emploi du temps, un bouton « Brancher » apparaît dans le widget : tu te connectes une fois et c'est bon. Rainette n'ouvre ensuite ces pages que le temps de les lire, pour ne pas manger de mémoire.
 
-## Utilisation
+Si quelque chose ne s'affiche pas, `~/Library/Application Support/Rainette/journal.txt` dit ce qu'elle a trouvé à chaque lecture.
 
-- **Barre « Tu veux quoi… »** : « j'ai quoi demain ? », « ajoute dentiste le 3 décembre à 10h30 », « réponds à Alex que c'est ok pour mardi ».
-- **Flèche ↩ sur un mail** : prépare une réponse à ce mail.
-- **Menu ⋯** : brancher Outlook / Teams, bouger ou redimensionner le widget, fermer Rainette.
-- **Journal** (pour comprendre ce qu'elle a vu) : `~/Library/Application Support/Rainette/journal.txt`.
+## Les limites
 
-## Vie privée
-
-- L'IA tourne en local avec Ollama : tes mails ne sont envoyés à aucun service d'IA.
-- Les seules requêtes externes sont celles de tes propres services (Mail, Outlook, Teams, ton école) et d'Open-Meteo (avec seulement les coordonnées de tes spots).
-- Rien n'est envoyé, ajouté à ton agenda ou écrit dans Teams sans ton clic.
-
-## Limites
-
-- Outlook web, Teams web et la plateforme Pepal sont lus dans leurs pages web : un changement de leur interface peut casser la lecture.
-- Teams : seul l'aperçu du dernier message de chaque conversation est lu.
-- Interface et consignes de l'IA en français.
-
-## Structure
-
-| Fichier | Rôle |
-|---|---|
-| `Sources/main.swift` | État, discussion avec l'IA et ses outils, vue du widget, fenêtre |
-| `Sources/Mails.swift` | Lecture de l'app Mail, tri et résumés |
-| `Sources/Reponses.swift` | Réponses aux mails |
-| `Sources/PagesWeb.swift` | Outlook web, Teams web, pages en arrière-plan |
-| `Sources/EmploiDuTemps.swift` | Cours (plateforme Pepal) |
-| `Sources/Mer.swift` | Conditions en mer |
-| `Sources/Disposition.swift` | Place, taille et aimantation du widget |
-| `Sources/Bureau.swift` | Fichiers du bureau poussés hors du widget |
-| `Sources/Reglages.swift` | Lecture des réglages personnels |
+Outlook, Teams et l'emploi du temps sont lus directement dans leurs pages web, donc si Microsoft ou la plateforme de l'école changent leur interface, il faudra adapter la lecture. Pour Teams, elle ne voit que l'aperçu du dernier message de chaque conversation. Et tout est en français, l'interface comme les réponses de l'IA.
 
 ## Licence
 
