@@ -93,12 +93,16 @@ final class PageWeb: NSObject, WKNavigationDelegate, NSWindowDelegate {
 
     /// Détruit la page : c'est ce qui libère vraiment la mémoire (le processus web s'arrête).
     func endormir() {
-        guard !visible, !occupe, let v = vue else { return }
-        v.stopLoading()
-        v.navigationDelegate = nil
+        guard !visible, !occupe, vue != nil else { return }
+        jeter()
+        fenetre.orderOut(nil)
+    }
+
+    private func jeter() {
+        vue?.stopLoading()
+        vue?.navigationDelegate = nil
         fenetre.contentView = nil
         vue = nil
-        fenetre.orderOut(nil)
     }
 
     /// Attend que la page soit connectée et prête (60 s au plus).
@@ -123,9 +127,13 @@ final class PageWeb: NSObject, WKNavigationDelegate, NSWindowDelegate {
     private(set) var lectureCassee = false
 
     func session<T>(_ action: () async -> T) async -> T? {
-        guard !occupe else { return nil }
+        guard !occupe, !visible else { return nil }
         occupe = true
-        if discret { await PageWeb.preparerFiltre() }
+        if discret {
+            await PageWeb.preparerFiltre()
+            // Page restée ouverte sans protections (après une connexion, ou après qu'il l'a ouverte) : on la recrée discrète.
+            if vue != nil, !vueDiscrete { jeter() }
+        }
         reveiller()
         let ok = await attendrePret()
         if !ok {
@@ -156,11 +164,7 @@ final class PageWeb: NSObject, WKNavigationDelegate, NSWindowDelegate {
         self.pourConnexion = pourConnexion
         visible = true
         // Page « discrète » d'une lecture : on la recrée normale, pour qu'il l'utilise comme d'habitude.
-        if vueDiscrete, let v = vue {
-            v.stopLoading(); v.navigationDelegate = nil
-            fenetre.contentView = nil
-            vue = nil
-        }
+        if vueDiscrete, vue != nil { jeter() }
         reveiller()
         fenetre.alphaValue = 1
         fenetre.ignoresMouseEvents = false
@@ -436,6 +440,8 @@ final class PageWeb: NSObject, WKNavigationDelegate, NSWindowDelegate {
     /// Ouvre la conversation de cette personne (page discrète) et renvoie ses messages envoyés
     /// depuis ton dernier message, dans l'ordre, 5 au plus.
     private func messagesDepuisTaReponse(de nom: String) async -> [String] {
+        // Jamais hors de la page discrète (s'il vient d'ouvrir Teams, la page n'a plus les protections).
+        guard !visible, vueDiscrete else { return [] }
         let ouvrir = """
         (() => { const n = \(String(reflecting: nom));
           const el = [...document.querySelectorAll('[role="treeitem"]')]

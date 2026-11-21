@@ -60,9 +60,21 @@ enum Ollama {
         req.timeoutInterval = 180
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: corps)
-        let (data, _) = try await URLSession.shared.data(for: req)
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+        let (data, rep) = try await URLSession.shared.data(for: req)
+        let json = try Ollama.verifier(data, rep)
         return json["message"] as? [String: Any] ?? [:]
+    }
+
+    enum Erreur: Error { case http(String), illisible }
+
+    /// Refuse une réponse en erreur (modèle absent, mémoire insuffisante…) au lieu de la prendre pour une réponse vide.
+    static func verifier(_ data: Data, _ rep: URLResponse) throws -> [String: Any] {
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        let code = (rep as? HTTPURLResponse)?.statusCode ?? 0
+        if code != 200 || json["error"] != nil {
+            throw Erreur.http("\(code) \(json["error"] as? String ?? "")")
+        }
+        return json
     }
 
     /// Réponse structurée (JSON imposé par un schéma).
@@ -77,12 +89,15 @@ enum Ollama {
         req.timeoutInterval = 300
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONSerialization.data(withJSONObject: corps)
-        let (data, _) = try await URLSession.shared.data(for: req)
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-        let contenu = (json["message"] as? [String: Any])?["content"] as? String ?? "{}"
+        let (data, rep) = try await URLSession.shared.data(for: req)
+        let json = try Ollama.verifier(data, rep)
+        let contenu = (json["message"] as? [String: Any])?["content"] as? String ?? ""
         // Le modèle n'a pas de sortie contrainte : on garde le bloc { … } de sa réponse.
-        guard let d = contenu.firstIndex(of: "{"), let f = contenu.lastIndex(of: "}"), d < f else { return [:] }
-        return (try? JSONSerialization.jsonObject(with: Data(contenu[d...f].utf8))) as? [String: Any] ?? [:]
+        // Pas de JSON lisible = erreur (sinon tout le paquet serait classé « pas important » pour toujours).
+        guard let d = contenu.firstIndex(of: "{"), let f = contenu.lastIndex(of: "}"), d < f,
+              let objet = (try? JSONSerialization.jsonObject(with: Data(contenu[d...f].utf8))) as? [String: Any]
+        else { throw Erreur.illisible }
+        return objet
     }
 
     static let outils: [[String: Any]] = [
@@ -215,7 +230,7 @@ final class Etat: ObservableObject {
         if faits.contains(t) { faits.remove(t) } else { faits.insert(t) }
         // On ne garde que ce qui est encore dans la liste.
         faits.formIntersection(aFaire)
-        UserDefaults.standard.set(Array(faits), forKey: "RainetteFaits")
+        if !Demo.active { UserDefaults.standard.set(Array(faits), forKey: "RainetteFaits") }
     }
 
     // Réponse à un mail
@@ -236,13 +251,14 @@ final class Etat: ObservableObject {
 
     func choisirTon(_ ton: Ton) {
         guard var r = reponse else { return }
+        if Demo.active { reponse?.ton = ton; return }
         r.ton = ton
         r.redige = true
         reponse = r
         Task {
             do {
                 let t = try await Repondeur.reformuler(r, ton: ton)
-                guard reponse?.mail.id == r.mail.id else { return }
+                guard reponse?.mail.idMessage == r.mail.idMessage else { return }
                 reponse?.texte = t
                 reponse?.redige = false
             } catch {
@@ -255,11 +271,13 @@ final class Etat: ObservableObject {
 
     func envoyerReponse(ouvrir: Bool) {
         guard let r = reponse, !r.texte.isEmpty else { return }
+        if Demo.active { reponse = nil; dire("(Démo : rien n'est envoyé 🐸)"); return }
         reponse?.envoi = true
         Task {
             do {
                 try await Repondeur.repondre(r.mail, texte: r.texte, ouvrir: ouvrir)
-                reponse = nil
+                // Seulement si c'est toujours cette réponse-là qui est affichée (il a pu en commencer une autre).
+                if reponse?.mail.idMessage == r.mail.idMessage { reponse = nil }
                 if ouvrir {
                     dire("C'est ouvert dans Mail, t'as plus qu'à vérifier et envoyer.")
                 } else {
@@ -267,7 +285,7 @@ final class Etat: ObservableObject {
                     historique.append(["role": "assistant", "content": "Réponse envoyée à \(r.mail.nom)."])
                 }
             } catch {
-                reponse?.envoi = false
+                if reponse?.mail.idMessage == r.mail.idMessage { reponse?.envoi = false }
                 dire("J'ai pas réussi à passer par Mail 😕 Essaie « Ouvre dans Mail ».")
             }
         }
@@ -293,6 +311,8 @@ final class Etat: ObservableObject {
     private var verdicts: [String: Verdict] = Resumeur.charger()
     /// Nombre de mails encore en cours de tri (affiché discrètement).
     @Published var triEnCours = 0
+    /// Mails que l'IA n'a pas pu trier (panne) : retentés à la prochaine lecture, jamais comptés « pas importants ».
+    @Published var nonTries = 0
 
     // Boîte école et Teams (pages web cachées)
     var ecole: PageWeb?
@@ -435,15 +455,29 @@ final class Etat: ObservableObject {
         Task { await rafraichirCours() }
     }
 
+    /// Une seule lecture + tri à la fois (bouton ↻, minuteur, réveil et reconnexion peuvent tomber ensemble).
+    private var lectureEnCours = false
+    /// Numéro de chaque mail (par identifiant de message) : unique toutes sources confondues, et stable
+    /// tant que Rainette tourne, pour que « (mail 12) » désigne toujours le même mail.
+    private var numeros: [String: Int] = [:]
+    private func numeroter(_ m: Mail) -> Mail {
+        let n = numeros[m.idMessage] ?? (numeros.values.max() ?? 0) + 1
+        numeros[m.idMessage] = n
+        return Mail(id: n, compte: m.compte, idMessage: m.idMessage, expediteur: m.expediteur,
+                    sujet: m.sujet, ilYa: m.ilYa, corps: m.corps)
+    }
+
     func rafraichirMails() async {
+        if Demo.active || lectureEnCours { return }
+        lectureEnCours = true
+        defer { lectureEnCours = false }
         await lirePagesWeb()
-        if etatMails == .lecture || etatMails == .tri { return }
-        etatMails = .lecture
+        etatMails = mails.isEmpty ? .lecture : etatMails
         let lus: [Mail]
         do {
             let gmail = try await LecteurMail.lire()
             let ecoleLus = (etatEcole == .connecte ? mailsOutlook : []) + (etatTeams == .connecte ? mailsTeams : [])
-            lus = (gmail + ecoleLus).sorted { $0.ilYa < $1.ilYa }
+            lus = (gmail + ecoleLus).sorted { $0.ilYa < $1.ilYa }.map(numeroter)
             journal("lecture : \(gmail.count) Gmail, \(ecoleLus.count) école (Outlook \(etatEcole)), Teams \(teamsNonLus) non lus (\(etatTeams))"
                     + ecoleLus.map { "\n  école · \($0.nom) · \($0.sujet) · il y a \($0.ilYa / 3600) h" }.joined())
         } catch LecteurMail.Erreur.refus(let msg) {
@@ -484,6 +518,9 @@ final class Etat: ObservableObject {
                 if !importants.isEmpty { etatMails = .ok }
             } catch {
                 triEnCours = 0
+                nonTries = lus.filter { verdicts[$0.idMessage] == nil }.count
+                Resumeur.memoriser(verdicts)
+                journal("tri interrompu : \(error) — \(nonTries) mail(s) à retrier")
                 etatMails = importants.isEmpty ? .erreur("L'IA répond pas… Ollama est bien lancé ?") : .ok
                 return
             }
@@ -492,6 +529,7 @@ final class Etat: ObservableObject {
         let presents = Set(lus.map(\.idMessage))
         if verdicts.count > 300 { verdicts = verdicts.filter { presents.contains($0.key) } }
         Resumeur.memoriser(verdicts)
+        nonTries = 0
         journal("tri : \(nouveaux.count) nouveau(x) mail(s) en \(Int(Date().timeIntervalSince(debut))) s, \(lus.count - nouveaux.count) déjà connus")
         triEnCours = 0
         cleMails = cle
@@ -561,6 +599,8 @@ final class Etat: ObservableObject {
         let t = texte.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty, !reflechit else { return }
         bulles.append(Bulle(deMoi: true, texte: t))
+        // Démo : l'IA ne voit ni le vrai agenda ni les vrais réglages.
+        if Demo.active { dire("C'est le mode démo : je fais semblant 🐸"); return }
         proposition = nil
         historique.append(["role": "user", "content": t])
         // Mémoire courte : on garde les derniers échanges, en repartant d'un message de l'utilisateur.
@@ -674,7 +714,7 @@ final class Etat: ObservableObject {
     }
 
     func confirmer() {
-        guard let p = proposition else { return }
+        guard let p = proposition, !Demo.active else { proposition = nil; return }
         do {
             try agenda.ajouter(p)
             dire("✅ C'est calé : \(p.titre), \(p.resume).")
@@ -853,7 +893,11 @@ struct Widget: View {
             } else {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(e.importants.prefix(6)) { r in ligneMail(r) }
-                    let autres = e.mails.count - min(e.importants.count, 6)
+                    let autres = e.mails.count - min(e.importants.count, 6) - e.nonTries
+                    if e.nonTries > 0, e.triEnCours == 0 {
+                        Text("\(e.nonTries) pas encore triés, l'IA répondait pas. Je réessaie au prochain coup.")
+                            .font(.system(size: 12)).foregroundStyle(.orange)
+                    }
                     if autres > 0, e.triEnCours == 0 {
                         Text(e.importants.isEmpty
                              ? "\(autres) non lus, que des pubs et des newsletters, rien d'important."

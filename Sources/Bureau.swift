@@ -33,8 +33,9 @@ final class GardienBureau {
 
     func verifier() {
         guard !enCours, let w = fenetre, let ecran = w.screen ?? NSScreen.main else { return }
-        // Le Finder compte depuis le haut gauche de l'écran ; AppKit depuis le bas gauche.
-        let h = ecran.frame.maxY
+        // Le Finder compte depuis le haut gauche de l'écran PRINCIPAL (celui de la barre des menus),
+        // AppKit depuis le bas gauche : la conversion se fait toujours avec la hauteur de l'écran principal.
+        let h = NSScreen.screens.first?.frame.maxY ?? ecran.frame.maxY
         let f = w.frame
         let marge: CGFloat = 45
         let zone = [f.minX - marge, h - f.maxY - marge, f.maxX + marge, h - f.minY + marge]

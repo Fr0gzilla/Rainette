@@ -199,7 +199,7 @@ enum Resumeur {
         let rep = try await Ollama.json(consigne: consigne, texte: texte, schema: schema)
         var res: [String: Verdict] = [:]
         for m in mails { res[m.idMessage] = Verdict(important: false, resume: "", prioritaire: false, tache: nil) }
-        let parId = Dictionary(uniqueKeysWithValues: mails.map { ($0.id, $0) })
+        let parId = Dictionary(mails.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         for o in rep["importants"] as? [[String: Any]] ?? [] {
             guard let id = (o["id"] as? Int) ?? Int(o["id"] as? String ?? ""), let m = parId[id] else { continue }
             let t = sansId((o["tache"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
