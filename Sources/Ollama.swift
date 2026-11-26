@@ -211,3 +211,42 @@ enum Dates {
         return (passe || prochain) ? cal.date(byAdding: .day, value: 7, to: avecHeure)! : avecHeure
     }
 }
+
+// MARK: - Chevauchements
+
+enum Chevauchements {
+    /// Un créneau : un évènement du calendrier ou un cours.
+    struct Plage {
+        let cle: String          // « e:<id> » (évènement) ou « c:<id> » (cours)
+        let titre: String
+        let debut: Date
+        let fin: Date
+        let estCours: Bool
+    }
+
+    /// « D15 PROJET D'ETUDES (9h–12h30) »
+    static func libelle(_ p: Plage, cal: Calendar = .current) -> String {
+        func h(_ d: Date) -> String {
+            let c = cal.dateComponents([.hour, .minute], from: d)
+            return "\(c.hour ?? 0)h" + ((c.minute ?? 0) > 0 ? String(format: "%02d", c.minute!) : "")
+        }
+        return "\(p.titre) (\(h(p.debut))–\(h(p.fin)))"
+    }
+
+    /// Pour chaque créneau, ce qui tombe en même temps. Deux cours entre eux ne comptent pas (c'est l'école),
+    /// ni deux créneaux qui se touchent seulement (l'un finit quand l'autre commence).
+    static func trouver(_ plages: [Plage]) -> [String: [String]] {
+        var res: [String: [String]] = [:]
+        let triees = plages.sorted { $0.debut < $1.debut }
+        for (i, a) in triees.enumerated() {
+            for b in triees[(i + 1)...] {
+                if b.debut >= a.fin { break }                 // triées : plus rien ne chevauche a
+                if a.estCours && b.estCours { continue }
+                if a.cle == b.cle { continue }
+                res[a.cle, default: []].append(libelle(b))
+                res[b.cle, default: []].append(libelle(a))
+            }
+        }
+        return res
+    }
+}

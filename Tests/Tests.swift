@@ -50,6 +50,24 @@ func texte(_ d: Date) -> String {
         verifie(recale("2026-11-27 10:00", "réunion mardi 10h") == "2026-12-01 10:00",
                 "vendredi proposé pour « mardi » → mardi suivant")
 
+        // MARK: Chevauchements
+        func plage(_ cle: String, _ t: String, _ d: String, _ f: String, cours: Bool = false) -> Chevauchements.Plage {
+            Chevauchements.Plage(cle: cle, titre: t, debut: date(d), fin: date(f), estCours: cours)
+        }
+        let ch = Chevauchements.trouver([
+            plage("e:rdv", "Rdv Studio Nova", "2026-11-30 09:00", "2026-11-30 13:00"),
+            plage("c:1", "D15 PROJET", "2026-11-30 09:00", "2026-11-30 12:30", cours: true),
+            plage("c:2", "D15 PROJET", "2026-11-30 13:30", "2026-11-30 17:00", cours: true),
+            plage("c:3", "D11 LEGAL", "2026-11-30 13:30", "2026-11-30 17:00", cours: true),
+            plage("e:foot", "Foot", "2026-11-30 17:00", "2026-11-30 18:00"),
+            plage("e:dentiste", "Dentiste", "2026-11-30 17:30", "2026-11-30 18:00"),
+        ])
+        verifie(ch["e:rdv"] == ["D15 PROJET (9h–12h30)"], "rdv pendant un cours", "\(ch["e:rdv"] ?? [])")
+        verifie(ch["c:1"] == ["Rdv Studio Nova (9h–13h)"], "le cours voit le rdv")
+        verifie(ch["c:2"] == nil && ch["c:3"] == nil, "deux cours entre eux : pas signalé")
+        verifie(ch["e:foot"] == ["Dentiste (17h30–18h)"], "deux évènements qui se chevauchent")
+        verifie(ch["c:2"] == nil, "un cours qui finit quand le foot commence : pas signalé")
+
         // MARK: Dates affichées par Outlook / Teams
         let hier = PageWeb.age("Hier") ?? -1
         verifie((23 * 3600...25 * 3600).contains(hier), "« Hier » ≈ 24 h", "\(hier)")

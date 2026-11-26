@@ -197,6 +197,15 @@ final class PageWeb: NSObject, WKNavigationDelegate, NSWindowDelegate {
     var compte: String?
     /// Ce que la dernière lecture a vu (pour le journal).
     var diagnostic = ""
+    /// Toutes les conversations Teams marquées « Non lu » à la dernière lecture (groupes compris), pour le point du jour.
+    struct ConversationTeams: Identifiable, Equatable {
+        var id: String { nom }
+        let nom: String
+        let apercu: String
+        let ilYa: Int?
+        let groupe: Bool
+    }
+    var conversationsNonLues: [ConversationTeams] = []
     /// Résultats de la preuve « rien n'est marqué comme lu » (pour le journal).
     var preuves: [String] = []
     /// Nombre d'éléments reconnus lors de la dernière lecture (0 sur une page prête = lecture sans doute cassée).
@@ -416,9 +425,16 @@ final class PageWeb: NSObject, WKNavigationDelegate, NSWindowDelegate {
         // Preuve de la lecture discrète : une conversation ouverte alors qu'elle était « Non lu »
         // doit l'être encore à la lecture suivante (la page est rechargée depuis les serveurs de Teams).
         var aVerifier = UserDefaults.standard.dictionary(forKey: "RainetteTeamsAVerifier") as? [String: Double] ?? [:]
+        conversationsNonLues = []
         for var l in listes {
             let nonLu = l.first == "Non lu"
             if nonLu { l.removeFirst() }
+            if nonLu, l.count >= 2, !conversationsNonLues.contains(where: { $0.nom == l[0] }) {
+                let apercu = l.count >= 3 ? l[2...].joined(separator: " ") : ""
+                conversationsNonLues.append(ConversationTeams(
+                    nom: l[0], apercu: apercu, ilYa: PageWeb.age(l[1]),
+                    groupe: PageWeb.estGroupe(apercu: apercu) || !PageWeb.ressembleAPersonne(l[0])))
+            }
             if let nom = l.first, aVerifier[nom] != nil {
                 preuves.append(nonLu
                     ? "✅ \(nom) : toujours « non lu » après la lecture discrète, rien n'a été marqué comme lu"

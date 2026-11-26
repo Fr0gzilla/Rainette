@@ -61,6 +61,9 @@ struct VueCompteRendu: View {
                     VStack(alignment: .leading, spacing: 14) {
                         bloc("À faire", "checklist", e.aFaire.filter { !e.faits.contains($0) }.count) { aFaire }
                         bloc("Mails et messages importants", "envelope.fill", e.importants.count) { importants }
+                        if e.teams != nil {
+                            bloc("Teams", "bubble.left.and.bubble.right.fill", e.conversationsTeams.count) { teams }
+                        }
                         bloc("Pas importants", "tray.full", e.mailsCaches().count) { caches }
                     }
                 }
@@ -132,6 +135,9 @@ struct VueCompteRendu: View {
         morceaux.append("\(e.importants.count) important\(e.importants.count > 1 ? "s" : "") sur \(e.mails.count) non lus")
         if e.teamsNonLus > 0 { morceaux.append("\(e.teamsNonLus) sur Teams") }
         if cours > 0 { morceaux.append("\(cours) cours aujourd'hui") }
+        // Chaque chevauchement est compté deux fois (une fois de chaque côté) : on prend les évènements.
+        let chevauchements = e.conflits.keys.filter { $0.hasPrefix("e:") }.count
+        if chevauchements > 0 { morceaux.append("⚠️ \(chevauchements) chevauchement\(chevauchements > 1 ? "s" : "")") }
         return morceaux.joined(separator: " · ").capitalizedPremier
     }
 
@@ -189,11 +195,45 @@ struct VueCompteRendu: View {
                     }
                     .buttonStyle(.plain).help("Ouvrir")
                 }
-                if e.teamsNonLus > 0 {
+
+            }
+        }
+    }
+
+    /// Les conversations Teams non lues, groupes compris : nom, dernier message, quand. Un clic l'ouvre dans Teams.
+    @ViewBuilder private var teams: some View {
+        if e.conversationsTeams.isEmpty {
+            Text(e.teamsNonLus > 0
+                 ? "\(e.teamsNonLus) notification\(e.teamsNonLus > 1 ? "s" : "") Teams, mais aucune conversation non lue dans la liste (sans doute des canaux ou des mentions)."
+                 : "Rien de nouveau sur Teams.")
+                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(e.conversationsTeams) { c in
+                    Button { e.teams?.ouvrirConversationTeams(c.nom) } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                            Image(systemName: c.groupe ? "person.3.fill" : "person.fill")
+                                .font(.system(size: 11)).foregroundStyle(c.groupe ? Color.secondary : or)
+                                .frame(width: 18).padding(.top, 3)
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack {
+                                    Text(c.nom).font(.system(size: 13.5, weight: .semibold)).lineLimit(1)
+                                    if c.groupe { Text("groupe").font(.system(size: 10.5)).foregroundStyle(.tertiary) }
+                                    Spacer(minLength: 6)
+                                    if let a = c.ilYa { Text(depuis(a)).font(.system(size: 11)).foregroundStyle(.tertiary) }
+                                }
+                                Text(c.apercu.isEmpty ? "Nouveau message" : c.apercu).font(.system(size: 13)).foregroundStyle(.secondary)
+                                    .lineLimit(3)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).help("Ouvrir dans Teams")
+                }
+                if e.teamsNonLus > e.conversationsTeams.count {
                     Button { e.teams?.afficher(pourConnexion: false) } label: {
-                        Label("\(e.teamsNonLus) message\(e.teamsNonLus > 1 ? "s" : "") pas lu\(e.teamsNonLus > 1 ? "s" : "") sur Teams (groupes compris) — ouvrir",
-                              systemImage: "bubble.left.and.bubble.right")
-                            .font(.system(size: 12.5)).foregroundStyle(or)
+                        Text("Teams compte \(e.teamsNonLus) non lus en tout (canaux, mentions…) — ouvrir Teams")
+                            .font(.system(size: 12)).foregroundStyle(or)
                     }
                     .buttonStyle(.plain)
                 }
@@ -270,6 +310,9 @@ struct VueCompteRendu: View {
                                      : "\(Fmt.heure.string(from: ev.startDate)) – \(Fmt.heure.string(from: ev.endDate))")
                                      + ((ev.location ?? "").isEmpty ? "" : " · \(ev.location!)"))
                                     .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                                if let c = e.conflit(ev) {
+                                    Text("⚠️ en même temps que \(c)").font(.system(size: 11.5)).foregroundStyle(.orange)
+                                }
                             }
                         case .cours(let k):
                             Capsule().fill(k.annule ? Color.secondary : or).frame(width: 4, height: 30)
@@ -279,6 +322,9 @@ struct VueCompteRendu: View {
                                 Text(jour(k.debut, avecJour) + "\(Fmt.heure.string(from: k.debut))–\(Fmt.heure.string(from: k.fin))"
                                      + (k.annule ? " · annulé" : k.distanciel ? " · à distance" : k.salle.map { " · \($0)" } ?? ""))
                                     .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                                if let c = e.conflit(k) {
+                                    Text("⚠️ en même temps que \(c)").font(.system(size: 11.5)).foregroundStyle(.orange)
+                                }
                             }
                         }
                     }

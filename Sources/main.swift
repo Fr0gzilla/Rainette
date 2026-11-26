@@ -47,6 +47,8 @@ struct Proposition {
     let fin: Date
     let journee: Bool
     let lieu: String?
+    /// Ce qui tombe déjà sur ce créneau (cours, rdv), pour prévenir avant de valider.
+    var conflit: String? = nil
 
     var resume: String {
         let jour = Fmt.jourCourt.string(from: debut)
@@ -263,7 +265,7 @@ final class Etat: ObservableObject {
         // Page prête mais sans les séances, ou jamais prête alors qu'on est connecté : lecture cassée.
         signalerCasse(c.nom, c.lectureCassee || (lu != nil && lu! == nil))
         guard let l = lu, let lus = l else { return }
-        if lus != cours { cours = lus; EmploiDuTemps.memoriser(lus) }
+        if lus != cours { cours = lus; EmploiDuTemps.memoriser(lus); majConflits() }
         journal("Emploi du temps : \(lus.count) séances lues")
     }
 
@@ -329,6 +331,8 @@ final class Etat: ObservableObject {
     }
 
     @Published var teamsNonLus = 0
+    /// Toutes les conversations Teams non lues (groupes compris), affichées dans le point du jour.
+    @Published var conversationsTeams: [PageWeb.ConversationTeams] = []
     /// Pages connectées mais illisibles (leur interface a sans doute changé).
     @Published var lecturesCassees: [String] = []
     func signalerCasse(_ nom: String, _ cassee: Bool) {
@@ -370,7 +374,7 @@ final class Etat: ObservableObject {
             // La liste d'abord : le compteur du titre n'apparaît qu'une fois Teams bien chargé.
             let messages = await t.messagesTeams(de: contactsTeams, premierId: 201)
             return (await t.nonLusTeams(), messages)
-        }) { teamsNonLus = r.0; mailsTeams = r.1 }
+        }) { teamsNonLus = r.0; mailsTeams = r.1; conversationsTeams = teams?.conversationsNonLues ?? [] }
         if let t = teams { signalerCasse("Teams", t.lectureCassee || (t.dernierEtat == .connecte && t.lignesLues == 0)) }
         if let t = teams, !t.preuves.isEmpty { t.preuves.forEach { journal($0) }; t.preuves = [] }
         journal("Teams : \(teamsNonLus) non lus, \(mailsTeams.count) message(s) privé(s) · \(teams?.diagnostic ?? "")")
@@ -517,7 +521,31 @@ final class Etat: ObservableObject {
         demain = sansDoublons(agenda.evenements(du: j1, au: j2))
         aVenir = sansDoublons(agenda.evenements(du: j2, au: cal.date(byAdding: .day, value: 7, to: j2)!))
         majA = maintenant
+        majConflits()
     }
+
+    /// Évènements (hors journées entières) et cours non annulés des 10 prochains jours.
+    func plagesAVenir() -> [Chevauchements.Plage] {
+        let cal = Calendar.current
+        let j0 = cal.startOfDay(for: Date()), fin = cal.date(byAdding: .day, value: 10, to: j0)!
+        var vus = Set<String>()
+        let evs = agenda.evenements(du: j0, au: fin).filter { !$0.isAllDay }.filter {
+            vus.insert(($0.title ?? "").lowercased() + "|\($0.startDate.timeIntervalSince1970)").inserted
+        }
+        return evs.map { Chevauchements.Plage(cle: "e:" + ($0.eventIdentifier ?? ""), titre: $0.title ?? "?",
+                                              debut: $0.startDate, fin: $0.endDate, estCours: false) }
+            + EmploiDuTemps.du(cours, debut: j0, fin: fin).filter { !$0.annule }.map {
+                Chevauchements.Plage(cle: "c:" + $0.id, titre: $0.matiere, debut: $0.debut, fin: $0.fin, estCours: true)
+            }
+    }
+
+    /// Ce qui tombe en même temps qu'autre chose (clé « e:<id> » ou « c:<id> » → libellés de l'autre).
+    @Published var conflits: [String: [String]] = [:]
+    func majConflits() {
+        conflits = Chevauchements.trouver(plagesAVenir())
+    }
+    func conflit(_ ev: EKEvent) -> String? { conflits["e:" + (ev.eventIdentifier ?? "")]?.joined(separator: ", ") }
+    func conflit(_ k: Cours) -> String? { conflits["c:" + k.id]?.joined(separator: ", ") }
 
     private func consigneSysteme() -> String {
         let cal = Calendar.current
@@ -550,7 +578,7 @@ final class Etat: ObservableObject {
         Quand il veut répondre à un mail (« réponds à … que … »), appelle repondre_mail avec le numéro du mail \
         et son message recopié tel quel, sans le reformuler toi-même. Mails non lus (numéro, expéditeur, objet) :
         \(mails.prefix(25).map { "[\($0.id)] \($0.nom) — \($0.sujet)" }.joined(separator: "\n"))
-        N'invente jamais d'évènement. lire_agenda donne aussi ses cours de l'école : préviens-le si ce qu'il veut ajouter tombe pendant un cours.
+        N'invente jamais d'évènement. lire_agenda donne aussi ses cours de l'école, et marque « ⚠️ CHEVAUCHE » ce qui tombe en même temps : signale-le-lui.
         """
     }
 
@@ -801,10 +829,12 @@ final class Etat: ObservableObject {
                 : "\(Fmt.heure.string(from: e.startDate))–\(Fmt.heure.string(from: e.endDate))"
             let lieu = (e.location ?? "").isEmpty ? "" : " (\(e.location!))"
             return (e.isAllDay ? Calendar.current.startOfDay(for: e.startDate) : e.startDate,
-                    "\(Fmt.jourCourt.string(from: e.startDate)) \(quand) : \(e.title ?? "sans titre")\(lieu)")
+                    "\(Fmt.jourCourt.string(from: e.startDate)) \(quand) : \(e.title ?? "sans titre")\(lieu)"
+                    + (conflit(e).map { " ⚠️ CHEVAUCHE : \($0)" } ?? ""))
         } + lecons.map { k in
             let ou = k.annule ? "ANNULÉ" : (k.distanciel ? "à distance" : (k.salle ?? ""))
-            return (k.debut, "\(Fmt.jourCourt.string(from: k.debut)) \(Fmt.heure.string(from: k.debut))–\(Fmt.heure.string(from: k.fin)) : cours \(k.matiere) (\(ou)\(k.prof.map { ", " + $0 } ?? ""))")
+            return (k.debut, "\(Fmt.jourCourt.string(from: k.debut)) \(Fmt.heure.string(from: k.debut))–\(Fmt.heure.string(from: k.fin)) : cours \(k.matiere) (\(ou)\(k.prof.map { ", " + $0 } ?? ""))"
+                    + (conflit(k).map { " ⚠️ CHEVAUCHE : \($0)" } ?? ""))
         }
         return lignes.sorted { $0.0 < $1.0 }.map(\.1).joined(separator: "\n")
     }
@@ -829,7 +859,13 @@ final class Etat: ObservableObject {
             fin = debut.addingTimeInterval(3600)
         }
         let lieu = (a["lieu"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        return Proposition(titre: titre, debut: debut, fin: fin, journee: journee, lieu: lieu)
+        var prop = Proposition(titre: titre, debut: debut, fin: fin, journee: journee, lieu: lieu)
+        if !journee {
+            let nouveau = Chevauchements.Plage(cle: "nouveau", titre: titre, debut: debut, fin: fin, estCours: false)
+            let deja = Chevauchements.trouver([nouveau] + plagesAVenir())["nouveau"] ?? []
+            if !deja.isEmpty { prop.conflit = deja.joined(separator: ", ") }
+        }
+        return prop
     }
 
     func confirmer() {
@@ -974,6 +1010,7 @@ struct Widget: View {
                                     Text(ev.title ?? "(sans titre)").font(.system(size: 14, weight: .medium)).lineLimit(2)
                                     Text(Fmt.jourCourt.string(from: ev.startDate).capitalizedPremier + " · " + quand(ev))
                                         .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                                    if let c = e.conflit(ev) { alerteConflit(c) }
                                 }
                             }
                         }
@@ -1261,6 +1298,7 @@ struct Widget: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(ev.title ?? "(sans titre)").font(.system(size: 14, weight: .medium)).lineLimit(2)
                                     Text(quand(ev)).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                                    if let c = e.conflit(ev) { alerteConflit(c) }
                                 }
                             }
                         case .cours(let k):
@@ -1271,6 +1309,7 @@ struct Widget: View {
                                         .font(.system(size: 14, weight: .medium)).lineLimit(1)
                                         .strikethrough(k.annule, color: .secondary)
                                     Text(detailCours(k)).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                                    if let c = e.conflit(k) { alerteConflit(c) }
                                 }
                             }
                         }
@@ -1281,6 +1320,10 @@ struct Widget: View {
                 }
             }
         }
+    }
+
+    private func alerteConflit(_ c: String) -> some View {
+        Text("⚠️ en même temps que \(c)").font(.system(size: 11.5)).foregroundStyle(.orange).lineLimit(2)
     }
 
     private func detailCours(_ k: Cours) -> String {
@@ -1340,6 +1383,9 @@ struct Widget: View {
                     Text(p.titre).font(.system(size: 15, weight: .semibold))
                     Text(p.resume + (p.lieu.map { "  ·  \($0)" } ?? ""))
                         .font(.system(size: 13)).foregroundStyle(.secondary)
+                    if let c = p.conflit {
+                        Text("⚠️ Ça tombe pendant : \(c)").font(.system(size: 12.5)).foregroundStyle(.orange)
+                    }
                     HStack(spacing: 8) {
                         Button { e.confirmer() } label: { Text("Vas-y").frame(minWidth: 70) }
                             .buttonStyle(.borderedProminent).tint(or).keyboardShortcut(.defaultAction)
