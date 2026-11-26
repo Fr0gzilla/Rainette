@@ -302,8 +302,19 @@ final class PageWeb: NSObject, WKNavigationDelegate, NSWindowDelegate {
         return res
     }
 
+    /// Aperçu d'une conversation de groupe : Teams le fait commencer par l'auteur collé au deux-points
+    /// (« Alex: Tout le monde… »). « Rdv : demain » (espace avant) est un message privé.
+    nonisolated static func estGroupe(apercu: String) -> Bool {
+        groupes(apercu, #"\p{L}[\p{L}'.\-]*(?: \p{L}[\p{L}'.\-]*){0,2}:\s.*"#) != nil
+    }
+
+    /// Nom de conversation qui ressemble à une personne : 2 à 4 mots, sans chiffres, tirets séparés ni émojis.
+    nonisolated static func ressembleAPersonne(_ nom: String) -> Bool {
+        groupes(nom, #"\p{L}[\p{L}'\-]*(?: \p{L}[\p{L}'\-]*){1,3}"#) != nil && !nom.contains(" - ")
+    }
+
     /// Groupes capturés si tout le texte correspond au motif (nil sinon ; groupe absent = "").
-    static func groupes(_ t: String, _ motif: String) -> [String]? {
+    nonisolated static func groupes(_ t: String, _ motif: String) -> [String]? {
         guard let re = try? NSRegularExpression(pattern: "^" + motif + "$"),
               let m = re.firstMatch(in: t, range: NSRange(t.startIndex..., in: t)) else { return nil }
         return (1..<m.numberOfRanges).map { k in
@@ -312,7 +323,7 @@ final class PageWeb: NSObject, WKNavigationDelegate, NSWindowDelegate {
     }
 
     /// Âge (en secondes) d'une date affichée par Outlook : « 12:48 », « Hier », « Lun 16/11 », « 16/11/2025 ».
-    static func age(_ t: String) -> Int? {
+    nonisolated static func age(_ t: String) -> Int? {
         let cal = Calendar.current, maintenant = Date()
         func ecart(_ d: Date?) -> Int? { d.map { max(0, Int(maintenant.timeIntervalSince($0))) } }
         if let g = groupes(t, #"(\d{1,2}):(\d{2})"#),
@@ -424,13 +435,11 @@ final class PageWeb: NSObject, WKNavigationDelegate, NSWindowDelegate {
             if apercu.hasPrefix("Vous") || vus.contains(nom) { continue }      // c'est lui qui a écrit en dernier
             // Conversation de groupe : l'aperçu commence par le nom de l'auteur (« Alex: Tout le monde… »). Ignorée.
             // (Teams colle le nom au « : » ; un message privé « Rdv : demain » a une espace avant, il n'est pas pris pour un groupe.)
-            let groupe = PageWeb.groupes(apercu, #"\p{L}[\p{L}'.\-]*(?: \p{L}[\p{L}'.\-]*){0,2}:\s.*"#) != nil
-            if groupe { continue }
+            if PageWeb.estGroupe(apercu: apercu) { continue }
             // Une personne : celles qu'il suit (même déjà lu), et toute autre personne avec un message non lu,
             // dont le nom ressemble à un nom de personne (2 à 4 mots, sans chiffres, tirets ni émojis : pas « D43 BACKEND »,
             // « TEAM ASC 2026 🚀 » ou « Entretien … - … »).
-            let personne = PageWeb.groupes(nom, #"\p{L}[\p{L}'\-]*(?: \p{L}[\p{L}'\-]*){1,3}"#) != nil && !nom.contains(" - ")
-            guard suivi || (nonLu && personne), res.count < 6 else { continue }
+            guard suivi || (nonLu && PageWeb.ressembleAPersonne(nom)), res.count < 6 else { continue }
             vus.insert(nom)
             // Tous ses messages depuis ta dernière réponse (5 au plus), lus dans la conversation, en mode discret.
             var messages = await messagesDepuisTaReponse(de: nom)

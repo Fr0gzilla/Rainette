@@ -5,189 +5,6 @@ import SwiftUI
 
 let or = Color(red: 0.83, green: 0.66, blue: 0.24)
 
-// MARK: - Dates
-
-enum Fmt {
-    static func f(_ motif: String) -> DateFormatter {
-        let d = DateFormatter()
-        d.locale = Locale(identifier: "fr_FR")
-        d.calendar = Calendar(identifier: .gregorian)
-        d.dateFormat = motif
-        return d
-    }
-    static let heure = f("HH:mm")
-    static let jourLong = f("EEEE d MMMM yyyy")
-    static let jourCourt = f("EEE d MMM")
-    static let iso = f("yyyy-MM-dd'T'HH:mm")
-    static let isoJour = f("yyyy-MM-dd")
-
-    /// Lit une date venue du modèle. Renvoie (date, journée entière ?).
-    static func lire(_ s: String) -> (Date, Bool)? {
-        let t = s.trimmingCharacters(in: .whitespaces)
-        for motif in ["yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm"] {
-            if let d = f(motif).date(from: t) { return (d, false) }
-        }
-        if let d = isoJour.date(from: t) { return (d, true) }
-        return nil
-    }
-}
-
-// MARK: - Ollama
-
-enum Ollama {
-    static let url = URL(string: "http://127.0.0.1:11434/api/chat")!
-    static let modele = "qwen3.5:9b"
-
-    /// À l'ouverture de session, Ollama peut démarrer après Rainette : on l'attend (90 s au plus).
-    static func attendrePret() async {
-        let tags = URL(string: "http://127.0.0.1:11434/api/tags")!
-        for _ in 0..<45 {
-            var req = URLRequest(url: tags)
-            req.timeoutInterval = 2
-            if let (_, r) = try? await URLSession.shared.data(for: req),
-               (r as? HTTPURLResponse)?.statusCode == 200 { return }
-            try? await Task.sleep(for: .seconds(2))
-        }
-    }
-
-    static func chat(_ messages: [[String: Any]], outils: [[String: Any]]) async throws -> [String: Any] {
-        let corps: [String: Any] = [
-            "model": modele, "messages": messages, "tools": outils,
-            "stream": false, "think": false, "options": ["temperature": 0.2],
-        ]
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 180
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: corps)
-        let (data, rep) = try await URLSession.shared.data(for: req)
-        let json = try Ollama.verifier(data, rep)
-        return json["message"] as? [String: Any] ?? [:]
-    }
-
-    enum Erreur: Error { case http(String), illisible }
-
-    /// Refuse une réponse en erreur (modèle absent, mémoire insuffisante…) au lieu de la prendre pour une réponse vide.
-    static func verifier(_ data: Data, _ rep: URLResponse) throws -> [String: Any] {
-        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-        let code = (rep as? HTTPURLResponse)?.statusCode ?? 0
-        if code != 200 || json["error"] != nil {
-            throw Erreur.http("\(code) \(json["error"] as? String ?? "")")
-        }
-        return json
-    }
-
-    /// Réponse structurée (JSON imposé par un schéma).
-    static func json(consigne: String, texte: String, schema: [String: Any]) async throws -> [String: Any] {
-        let corps: [String: Any] = [
-            "model": modele, "stream": false, "think": false,
-            "options": ["temperature": 0.1, "num_ctx": 8192],
-            "messages": [["role": "system", "content": consigne], ["role": "user", "content": texte]],
-        ]
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 300
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: corps)
-        let (data, rep) = try await URLSession.shared.data(for: req)
-        let json = try Ollama.verifier(data, rep)
-        let contenu = (json["message"] as? [String: Any])?["content"] as? String ?? ""
-        // Le modèle n'a pas de sortie contrainte : on garde le bloc { … } de sa réponse, réparé s'il est incomplet.
-        // Pas de JSON lisible = erreur (sinon tout le paquet serait classé « pas important » pour toujours).
-        guard let objet = Ollama.objetJSON(contenu) else { throw Erreur.illisible }
-        return objet
-    }
-
-    /// Extrait l'objet JSON d'une réponse. Le modèle oublie parfois de refermer la fin (« …}] » au lieu de « …}]} ») :
-    /// on referme ce qui est resté ouvert (en ignorant ce qui est entre guillemets).
-    static func objetJSON(_ texte: String) -> [String: Any]? {
-        guard let d = texte.firstIndex(of: "{") else { return nil }
-        var t = String(texte[d...])
-        if let f = t.lastIndex(of: "}"), let o = (try? JSONSerialization.jsonObject(with: Data(t[...f].utf8))) as? [String: Any] {
-            return o
-        }
-        var pile: [Character] = []
-        var dansChaine = false, echappe = false
-        for c in t {
-            if dansChaine {
-                if echappe { echappe = false } else if c == "\\" { echappe = true } else if c == "\"" { dansChaine = false }
-                continue
-            }
-            switch c {
-            case "\"": dansChaine = true
-            case "{": pile.append("}")
-            case "[": pile.append("]")
-            case "}", "]": if !pile.isEmpty { pile.removeLast() }
-            default: break
-            }
-        }
-        if dansChaine { t += "\"" }
-        t = t.trimmingCharacters(in: .whitespacesAndNewlines)
-        while t.hasSuffix(",") { t.removeLast() }
-        t += String(pile.reversed())
-        return (try? JSONSerialization.jsonObject(with: Data(t.utf8))) as? [String: Any]
-    }
-
-    static let outils: [[String: Any]] = [
-        [
-            "type": "function",
-            "function": [
-                "name": "ajouter_evenement",
-                "description": "Propose d'ajouter un évènement au calendrier Apple. L'utilisateur confirmera.",
-                "parameters": [
-                    "type": "object",
-                    "properties": [
-                        "titre": ["type": "string", "description": "Titre court"],
-                        "debut": ["type": "string", "description": "AAAA-MM-JJTHH:MM si une heure est donnée, sinon AAAA-MM-JJ (journée entière). Jamais d'heure inventée."],
-                        "fin": ["type": "string", "description": "AAAA-MM-JJTHH:MM (facultatif, 1 h par défaut)"],
-                        "lieu": ["type": "string", "description": "Lieu (facultatif)"],
-                    ],
-                    "required": ["titre", "debut"],
-                ],
-            ],
-        ],
-        [
-            "type": "function",
-            "function": [
-                "name": "lire_agenda",
-                "description": "Liste les évènements du calendrier entre deux dates incluses.",
-                "parameters": [
-                    "type": "object",
-                    "properties": [
-                        "du": ["type": "string", "description": "AAAA-MM-JJ"],
-                        "au": ["type": "string", "description": "AAAA-MM-JJ"],
-                    ],
-                    "required": ["du", "au"],
-                ],
-            ],
-        ],
-        [
-            "type": "function",
-            "function": [
-                "name": "repondre_mail",
-                "description": "Prépare une réponse à un des mails non lus. Rainette demandera le ton puis reformulera ; l'utilisateur relira avant l'envoi.",
-                "parameters": [
-                    "type": "object",
-                    "properties": [
-                        "id": ["type": "integer", "description": "Numéro du mail dans la liste des mails non lus"],
-                        "message": ["type": "string", "description": "Ce que l'utilisateur veut répondre, recopié tel quel"],
-                    ],
-                    "required": ["id", "message"],
-                ],
-            ],
-        ],
-        [
-            "type": "function",
-            "function": [
-                "name": "lire_mails",
-                "description": "Liste les mails non lus des trois derniers jours (expéditeur, sujet, début du texte).",
-                "parameters": ["type": "object", "properties": [String: Any]()],
-            ],
-        ],
-    ]
-}
-
-// MARK: - Calendrier
 
 final class Agenda {
     let store = EKEventStore()
@@ -287,6 +104,11 @@ final class Etat: ObservableObject {
                 }
                 faits.remove(t)
             }
+            dernierRetrait = Retrait(tache: t, ids: concernes)
+            Task {
+                try? await Task.sleep(for: .seconds(8))
+                if dernierRetrait?.tache == t { withAnimation { dernierRetrait = nil } }
+            }
             if !Demo.active {
                 // On ne garde en mémoire que les mails encore présents.
                 traites.formIntersection(Set(mails.map(\.idMessage)).union(concernes))
@@ -296,6 +118,42 @@ final class Etat: ObservableObject {
             }
         }
     }
+    struct Retrait: Equatable { let tache: String; let ids: [String] }
+    /// Dernière tâche cochée (et ses mails retirés), annulable quelques secondes.
+    @Published var dernierRetrait: Retrait?
+
+    func annulerRetrait() {
+        guard let r = dernierRetrait else { return }
+        withAnimation(.easeOut(duration: 0.25)) {
+            traites.subtract(r.ids)
+            if Demo.active { aFaire.insert(r.tache, at: 0) }
+            else { (importants, aFaire) = Resumeur.affichage(mails, verdicts, traites: traites) }
+            dernierRetrait = nil
+        }
+        if !Demo.active {
+            UserDefaults.standard.set(Array(traites), forKey: "RainetteTraites")
+            journal("à faire : « \(r.tache) » décoché (annulé), mail(s) remis")
+        }
+    }
+
+    /// Mails triés « inutiles » (cachés), hors mails traités.
+    func mailsCaches() -> [Mail] {
+        mails.filter { m in
+            guard let v = verdicts[m.idMessage] else { return false }
+            return !v.important && !traites.contains(m.idMessage)
+        }
+    }
+
+    /// Il remonte un mail caché : il devient « à savoir » (affiché), et le reste après les prochains tris.
+    func remonter(_ m: Mail) {
+        verdicts[m.idMessage] = Verdict(important: true, resume: "« \(m.sujet) »", prioritaire: false, tache: nil)
+        (importants, aFaire) = Resumeur.affichage(mails, verdicts, traites: traites)
+        if !Demo.active {
+            Resumeur.memoriser(verdicts)
+            journal("tri : « \(m.sujet) » (\(m.nom)) remonté à la main")
+        }
+    }
+
     /// Mails traités (tâche cochée) : plus affichés.
     @Published var traites: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "RainetteTraites") ?? [])
 
@@ -538,6 +396,8 @@ final class Etat: ObservableObject {
         if Demo.active || lectureEnCours { return }
         lectureEnCours = true
         defer { lectureEnCours = false }
+        // Une fois les mails lus et triés : le point du matin, s'il n'a pas encore été fait aujourd'hui.
+        defer { if etatMails == .ok { pointDuMatinSiBesoin() } }
         await lirePagesWeb()
         etatMails = mails.isEmpty ? .lecture : etatMails
         let lus: [Mail]
@@ -687,6 +547,7 @@ final class Etat: ObservableObject {
         bulles.append(Bulle(deMoi: true, texte: t))
         // Démo : l'IA ne voit ni le vrai agenda ni les vrais réglages.
         if Demo.active { dire("C'est le mode démo : je fais semblant 🐸"); return }
+        pointSeul = false
         activite()
         // Une carte « Je te mets ça ? » attend : « oui / ouai / vas-y » la valide, « non » l'annule.
         if proposition != nil {
@@ -740,8 +601,72 @@ final class Etat: ObservableObject {
 
     private func effacerSiInactif() {
         guard !bulles.isEmpty, !reflechit, proposition == nil, reponse == nil else { return }
-        let delai: TimeInterval = finAnnoncee ? 20 : 180
+        // Le point du matin seul reste affiché plus longtemps (il n'a peut-être pas encore regardé l'écran).
+        let delai: TimeInterval = pointSeul ? 4 * 3600 : (finAnnoncee ? 20 : 180)
         if Date().timeIntervalSince(derniereActivite) >= delai { effacerConversation() }
+    }
+
+    // MARK: Point du matin
+
+    /// Vrai tant que la seule bulle affichée est le point du matin.
+    private var pointSeul = false
+
+    func pointDuMatinSiBesoin() {
+        let jour = Fmt.isoJour.string(from: Date())
+        let h = Calendar.current.component(.hour, from: Date())
+        guard !Demo.active, h >= 5, UserDefaults.standard.string(forKey: "RainettePointDuJour") != jour,
+              bulles.isEmpty, proposition == nil, reponse == nil else { return }
+        UserDefaults.standard.set(jour, forKey: "RainettePointDuJour")
+        dire(pointDuMatin())
+        pointSeul = true
+        journal("point du matin affiché")
+    }
+
+    /// Le point du jour, écrit par le code (rapide et sans erreur) : tâches, cours, agenda, ce qui arrive, la mer.
+    func pointDuMatin() -> String {
+        let cal = Calendar.current
+        let j0 = cal.startOfDay(for: Date()), j1 = cal.date(byAdding: .day, value: 1, to: j0)!
+        var lignes: [String] = []
+        // « 9h », « 13h30 » : plus naturel que « 09:00 ».
+        func h(_ d: Date) -> String {
+            let c = cal.dateComponents([.hour, .minute], from: d)
+            return "\(c.hour ?? 0)h" + ((c.minute ?? 0) > 0 ? String(format: "%02d", c.minute!) : "")
+        }
+        func sansPoint(_ t: String) -> String { t.trimmingCharacters(in: CharacterSet(charactersIn: ". ")) }
+        let taches = aFaire.filter { !faits.contains($0) }.map(sansPoint)
+        if !taches.isEmpty {
+            lignes.append("\(taches.count == 1 ? "1 truc" : "\(taches.count) trucs") à faire : "
+                          + taches.prefix(3).joined(separator: " ; ") + ".")
+        }
+        // Seulement les cours qui ne sont pas encore finis.
+        let lecons = EmploiDuTemps.du(cours, debut: j0, fin: j1).filter { !$0.annule && $0.fin > Date() }
+        let annules = EmploiDuTemps.du(cours, debut: j0, fin: j1).filter(\.annule)
+        if !lecons.isEmpty {
+            let l = lecons.prefix(4).map { k in
+                "\(k.matiere) à \(h(k.debut))"
+                    + (k.distanciel ? " (à distance)" : k.salle.map { " (\($0))" } ?? "")
+            }
+            lignes.append("Cours : " + l.joined(separator: ", ") + ".")
+        }
+        if !annules.isEmpty { lignes.append("Annulé : " + annules.map(\.matiere).joined(separator: ", ") + " 🎉") }
+        let evs = aujourdhui
+        if !evs.isEmpty {
+            lignes.append("Agenda : " + evs.prefix(3).map { e in
+                (e.title ?? "?") + (e.isAllDay ? "" : " à \(h(e.startDate))")
+            }.joined(separator: ", ") + ".")
+        }
+        if lecons.isEmpty && evs.isEmpty { lignes.append("Rien de calé aujourd'hui, t'es tranquille.") }
+        if let p = (demain + aVenir).first {
+            let quand = cal.isDateInTomorrow(p.startDate) ? "demain" : Fmt.jourCourt.string(from: p.startDate)
+            lignes.append("Ensuite : \(p.title ?? "?") \(quand)\(p.isAllDay ? "" : " à \(h(p.startDate))").")
+        }
+        if let m = mer {
+            var bon: [String] = []
+            if let n = m.navigation, let h = Mer.maintenant(n), Mer.avisNavigation(h).0 == .bon { bon.append("cata") }
+            if let s = m.surf, let h = Mer.maintenant(s), Mer.avisSurf(h).0 == .bon { bon.append("surf") }
+            if !bon.isEmpty { lignes.append("Et ça a l'air bon pour le \(bon.joined(separator: " et le ")) 🌊") }
+        }
+        return "☀️ Le point du jour\n" + lignes.joined(separator: "\n")
     }
 
     func effacerConversation() {
@@ -749,6 +674,7 @@ final class Etat: ObservableObject {
         historique = []
         enAttente = []
         finAnnoncee = false
+        pointSeul = false
     }
 
     private func boucle() async {
@@ -855,36 +781,18 @@ final class Etat: ObservableObject {
         guard let titre = a["titre"] as? String, !titre.isEmpty,
               let lu = (a["debut"] as? String).flatMap(Fmt.lire)
         else { return nil }
-        var debut = lu.0
         let journee = lu.1
-        // Une date déjà passée vient presque toujours d'une année mal choisie (« le 17 septembre ») : l'an prochain.
-        let cal = Calendar.current
-        while debut < cal.startOfDay(for: Date()), let d = cal.date(byAdding: .year, value: 1, to: debut) { debut = d }
-        // Le modèle se trompe souvent de jour (« mardi » → un mercredi) : si le message cite un jour de la semaine
-        // et que la date ne tombe pas ce jour-là, on prend le prochain jour de ce nom (en gardant l'heure).
         let dernier = (historique.last {
             ($0["role"] as? String) == "user" && !(($0["content"] as? String ?? "").hasPrefix("(Rappel du système"))
-        }?["content"] as? String ?? "").lowercased()
-        let noms = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"]
-        let cites = noms.filter { dernier.range(of: "\\b\($0)\\b", options: .regularExpression) != nil }
-        if corrigerJour, cites.count == 1, !dernier.contains("aujourd"), !dernier.contains("demain"),
-           let voulu = noms.firstIndex(where: { dernier.range(of: "\\b\($0)\\b", options: .regularExpression) != nil }),
-           cal.component(.weekday, from: debut) != voulu + 1 {
-            let h = cal.dateComponents([.hour, .minute], from: debut)
-            var d = cal.startOfDay(for: Date())
-            while cal.component(.weekday, from: d) != voulu + 1 { d = cal.date(byAdding: .day, value: 1, to: d)! }
-            if let avecHeure = cal.date(bySettingHour: h.hour ?? 0, minute: h.minute ?? 0, second: 0, of: d) {
-                // Aujourd'hui mais heure déjà passée (ou « prochain ») : la semaine d'après.
-                let passe = !journee && avecHeure < Date()
-                let prochain = dernier.contains("\(noms[voulu]) prochain") && cal.isDateInToday(d)
-                debut = (passe || prochain) ? cal.date(byAdding: .day, value: 7, to: avecHeure)! : avecHeure
-            }
-        }
-        var fin: Date
+        }?["content"] as? String ?? "")
+        let debut = Dates.recaler(lu.0, journee: journee, message: dernier, corrigerJour: corrigerJour)
+        // La fin suit le début recalé : on garde la durée demandée (sinon « lundi 9h-13h » recalé ferait 2 jours).
+        let finModele = (a["fin"] as? String).flatMap(Fmt.lire)?.0
+        let fin: Date
         if journee {
             fin = Calendar.current.date(byAdding: .day, value: 1, to: debut)!
-        } else if let f = (a["fin"] as? String).flatMap(Fmt.lire)?.0, f > debut {
-            fin = f
+        } else if let f = finModele, f > lu.0 {
+            fin = debut.addingTimeInterval(f.timeIntervalSince(lu.0))
         } else {
             fin = debut.addingTimeInterval(3600)
         }
@@ -934,6 +842,7 @@ struct Widget: View {
     @ObservedObject var e: Etat
     @State private var saisie = ""
     @State private var hBulles: CGFloat = 80
+    @State private var voirCaches = false
     @FocusState private var focus: Bool
     private let horloge = Timer.publish(every: 1800, on: .main, in: .common).autoconnect()
 
@@ -976,9 +885,20 @@ struct Widget: View {
                 carteMails
                 connexions
             }
-            if !e.aFaire.isEmpty {
+            if !e.aFaire.isEmpty || e.dernierRetrait != nil {
                 carte("À faire", icone: "checklist", compte: nil) {
                     VStack(alignment: .leading, spacing: 7) {
+                        if let r = e.dernierRetrait {
+                            HStack(spacing: 8) {
+                                Image(systemName: "checkmark.circle.fill").font(.system(size: 13)).foregroundStyle(.green)
+                                Text("« \(r.tache) » fait\(r.ids.isEmpty ? "" : ", mail retiré")")
+                                    .font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(1)
+                                Spacer(minLength: 4)
+                                Button("Annuler") { e.annulerRetrait() }
+                                    .buttonStyle(.plain).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(or)
+                            }
+                            .transition(.opacity)
+                        }
                         ForEach(e.aFaire, id: \.self) { t in
                             let fait = e.faits.contains(t)
                             Button { withAnimation(.easeOut(duration: 0.15)) { e.cocher(t) } } label: {
@@ -1104,10 +1024,18 @@ struct Widget: View {
                             .font(.system(size: 12)).foregroundStyle(.orange)
                     }
                     if autres > 0, e.triEnCours == 0 {
-                        Text(e.importants.isEmpty
-                             ? "\(autres) non lus, que des pubs et des newsletters, rien d'important."
-                             : "+ \(autres) autres, rien d'important.")
-                            .font(.system(size: 12)).foregroundStyle(.secondary)
+                        // Un clic déroule les mails cachés : on peut en remonter un si le tri s'est trompé.
+                        Button { withAnimation(.easeOut(duration: 0.2)) { voirCaches.toggle() } } label: {
+                            HStack(spacing: 5) {
+                                Text(e.importants.isEmpty
+                                     ? "\(autres) non lus, que des pubs et des newsletters, rien d'important."
+                                     : "+ \(autres) autres, rien d'important.")
+                                Image(systemName: voirCaches ? "chevron.up" : "chevron.down").font(.system(size: 9, weight: .bold))
+                            }
+                            .font(.system(size: 12)).foregroundStyle(.secondary).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).help(voirCaches ? "Masquer" : "Voir ce que j'ai caché")
+                        if voirCaches { listeCaches }
                     }
                     if e.triEnCours > 0 {
                         HStack(spacing: 6) {
@@ -1199,6 +1127,31 @@ struct Widget: View {
     private func repondreA(_ m: Mail) {
         saisie = "Réponds à \(m.nom) (mail \(m.id)) : "
         focus = true
+    }
+
+    /// Les mails jugés « inutiles » : expéditeur et objet, un clic l'ouvre, la flèche le remonte dans le widget.
+    private var listeCaches: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(e.mailsCaches().prefix(25), id: \.idMessage) { m in
+                HStack(spacing: 8) {
+                    Button { m.ouvrir() } label: {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(m.nom).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                            Text(m.sujet).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).help("Ouvrir")
+                    Button { withAnimation { e.remonter(m) } } label: {
+                        Image(systemName: "arrow.up.circle").font(.system(size: 14)).foregroundStyle(or)
+                    }
+                    .buttonStyle(.plain).help("C'est important : l'afficher")
+                }
+                .padding(.leading, 4)
+            }
+        }
+        .padding(8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.18)))
     }
 
     private func depuis(_ s: Int) -> String {
