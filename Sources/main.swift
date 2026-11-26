@@ -214,6 +214,8 @@ struct Proposition {
 final class Etat: ObservableObject {
     @Published var aujourdhui: [EKEvent] = []
     @Published var demain: [EKEvent] = []
+    /// Évènements du calendrier des 7 jours après demain (pour voir ce qu'il vient d'ajouter pour plus tard).
+    @Published var aVenir: [EKEvent] = []
     @Published var majA = Date()
     @Published var acces = true
     @Published var bulles: [Bulle] = []
@@ -558,6 +560,7 @@ final class Etat: ObservableObject {
     func demarrer() async {
         preparerPagesWeb()
         acces = await agenda.demanderAcces()
+        journal("agenda : accès au calendrier \(acces ? "autorisé" : "REFUSÉ (Réglages Système › Confidentialité › Calendriers)")")
         rafraichirTout()
         NotificationCenter.default.addObserver(
             forName: .EKEventStoreChanged, object: agenda.store, queue: .main
@@ -570,8 +573,14 @@ final class Etat: ObservableObject {
         let j1 = cal.date(byAdding: .day, value: 1, to: j0)!
         let j2 = cal.date(byAdding: .day, value: 2, to: j0)!
         let maintenant = Date()
-        aujourdhui = agenda.evenements(du: j0, au: j1).filter { $0.isAllDay || $0.endDate > maintenant }
-        demain = agenda.evenements(du: j1, au: j2)
+        // Un même évènement peut figurer dans deux agendas (ex. Gmail + suggestions de Siri) : une seule fois.
+        func sansDoublons(_ evs: [EKEvent]) -> [EKEvent] {
+            var vus = Set<String>()
+            return evs.filter { vus.insert(($0.title ?? "").lowercased() + "|\($0.startDate.timeIntervalSince1970)").inserted }
+        }
+        aujourdhui = sansDoublons(agenda.evenements(du: j0, au: j1).filter { $0.isAllDay || $0.endDate > maintenant })
+        demain = sansDoublons(agenda.evenements(du: j1, au: j2))
+        aVenir = sansDoublons(agenda.evenements(du: j2, au: cal.date(byAdding: .day, value: 7, to: j2)!))
         majA = maintenant
     }
 
@@ -937,6 +946,27 @@ struct Widget: View {
             }
             carte("Demain", icone: "moon.stars.fill", compte: e.demain.count + coursDem.count) {
                 liste(e.demain, cours: coursDem, vide: "Rien de calé demain.")
+            }
+            if !e.aVenir.isEmpty {
+                carte("À venir", icone: "calendar.badge.clock", compte: e.aVenir.count) {
+                    VStack(alignment: .leading, spacing: 9) {
+                        ForEach(e.aVenir.prefix(6), id: \.eventIdentifier) { ev in
+                            HStack(alignment: .top, spacing: 10) {
+                                Capsule()
+                                    .fill(ev.calendar.map { Color(nsColor: $0.color) } ?? or)
+                                    .frame(width: 4, height: 34)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(ev.title ?? "(sans titre)").font(.system(size: 14, weight: .medium)).lineLimit(2)
+                                    Text(Fmt.jourCourt.string(from: ev.startDate).capitalizedPremier + " · " + quand(ev))
+                                        .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }
+                        }
+                        if e.aVenir.count > 6 {
+                            Text("+ \(e.aVenir.count - 6) autres").font(.system(size: 12)).foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
         }
     }
