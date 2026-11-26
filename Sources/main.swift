@@ -92,12 +92,40 @@ enum Ollama {
         let (data, rep) = try await URLSession.shared.data(for: req)
         let json = try Ollama.verifier(data, rep)
         let contenu = (json["message"] as? [String: Any])?["content"] as? String ?? ""
-        // Le modèle n'a pas de sortie contrainte : on garde le bloc { … } de sa réponse.
+        // Le modèle n'a pas de sortie contrainte : on garde le bloc { … } de sa réponse, réparé s'il est incomplet.
         // Pas de JSON lisible = erreur (sinon tout le paquet serait classé « pas important » pour toujours).
-        guard let d = contenu.firstIndex(of: "{"), let f = contenu.lastIndex(of: "}"), d < f,
-              let objet = (try? JSONSerialization.jsonObject(with: Data(contenu[d...f].utf8))) as? [String: Any]
-        else { throw Erreur.illisible }
+        guard let objet = Ollama.objetJSON(contenu) else { throw Erreur.illisible }
         return objet
+    }
+
+    /// Extrait l'objet JSON d'une réponse. Le modèle oublie parfois de refermer la fin (« …}] » au lieu de « …}]} ») :
+    /// on referme ce qui est resté ouvert (en ignorant ce qui est entre guillemets).
+    static func objetJSON(_ texte: String) -> [String: Any]? {
+        guard let d = texte.firstIndex(of: "{") else { return nil }
+        var t = String(texte[d...])
+        if let f = t.lastIndex(of: "}"), let o = (try? JSONSerialization.jsonObject(with: Data(t[...f].utf8))) as? [String: Any] {
+            return o
+        }
+        var pile: [Character] = []
+        var dansChaine = false, echappe = false
+        for c in t {
+            if dansChaine {
+                if echappe { echappe = false } else if c == "\\" { echappe = true } else if c == "\"" { dansChaine = false }
+                continue
+            }
+            switch c {
+            case "\"": dansChaine = true
+            case "{": pile.append("}")
+            case "[": pile.append("]")
+            case "}", "]": if !pile.isEmpty { pile.removeLast() }
+            default: break
+            }
+        }
+        if dansChaine { t += "\"" }
+        t = t.trimmingCharacters(in: .whitespacesAndNewlines)
+        while t.hasSuffix(",") { t.removeLast() }
+        t += String(pile.reversed())
+        return (try? JSONSerialization.jsonObject(with: Data(t.utf8))) as? [String: Any]
     }
 
     static let outils: [[String: Any]] = [
@@ -243,7 +271,33 @@ final class Etat: ObservableObject {
         // On ne garde que ce qui est encore dans la liste.
         faits.formIntersection(aFaire)
         if !Demo.active { UserDefaults.standard.set(Array(faits), forKey: "RainetteFaits") }
+        guard faits.contains(t) else { return }
+        // Coché = c'est fait : après un instant (le temps de voir la case barrée), le mail d'où vient la tâche
+        // et la tâche disparaissent du widget. Retenu même après un redémarrage.
+        Task {
+            try? await Task.sleep(for: .seconds(1.5))
+            guard faits.contains(t) else { return }          // décoché entre-temps
+            let concernes = mails.filter { verdicts[$0.idMessage]?.tache == t }.map(\.idMessage)
+            withAnimation(.easeOut(duration: 0.3)) {
+                traites.formUnion(concernes)
+                if Demo.active {
+                    aFaire.removeAll { $0 == t }
+                } else {
+                    (importants, aFaire) = Resumeur.affichage(mails, verdicts, traites: traites)
+                }
+                faits.remove(t)
+            }
+            if !Demo.active {
+                // On ne garde en mémoire que les mails encore présents.
+                traites.formIntersection(Set(mails.map(\.idMessage)).union(concernes))
+                UserDefaults.standard.set(Array(traites), forKey: "RainetteTraites")
+                UserDefaults.standard.set(Array(faits), forKey: "RainetteFaits")
+                journal("à faire : « \(t) » coché, \(concernes.count) mail(s) retiré(s) du widget")
+            }
+        }
     }
+    /// Mails traités (tâche cochée) : plus affichés.
+    @Published var traites: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "RainetteTraites") ?? [])
 
     // Réponse à un mail
     @Published var reponse: ReponseMail?
@@ -391,7 +445,8 @@ final class Etat: ObservableObject {
         }
         Mail.ouvrirEcole = { [weak e = ecole, weak t = teams] m in
             if m.idMessage.hasPrefix("teams:") {
-                t?.ouvrirConversationTeams(String(m.idMessage.dropFirst("teams:".count)))
+                let nom = m.idMessage.dropFirst("teams:".count).split(separator: "#").first.map(String.init) ?? ""
+                t?.ouvrirConversationTeams(nom)
             } else {
                 e?.ouvrirConversation(String(m.idMessage.dropFirst("outlook:".count)))
             }
@@ -449,7 +504,7 @@ final class Etat: ObservableObject {
         }) { teamsNonLus = r.0; mailsTeams = r.1 }
         if let t = teams { signalerCasse("Teams", t.lectureCassee || (t.dernierEtat == .connecte && t.lignesLues == 0)) }
         if let t = teams, !t.preuves.isEmpty { t.preuves.forEach { journal($0) }; t.preuves = [] }
-        journal("Teams : \(teamsNonLus) non lus, \(mailsTeams.count) message(s) de tes contacts · \(teams?.diagnostic ?? "")")
+        journal("Teams : \(teamsNonLus) non lus, \(mailsTeams.count) message(s) privé(s) · \(teams?.diagnostic ?? "")")
         majEtatsWeb()
     }
 
@@ -508,9 +563,16 @@ final class Etat: ObservableObject {
             etatMails = .ok
             return
         }
+        // Messages Teams d'une personne (pas d'un groupe) : toujours affichés, en priorité, sans passer par l'IA.
+        for m in lus where m.idMessage.hasPrefix("teams:") {
+            let premier = m.corps.split(separator: "\n").last.map(String.init) ?? m.corps
+            verdicts[m.idMessage] = Verdict(important: true,
+                                            resume: premier.count > 140 ? String(premier.prefix(137)) + "…" : premier,
+                                            prioritaire: true, tache: "Réponds à \(m.nom) sur Teams")
+        }
         // Seuls les mails jamais triés passent par l'IA, par paquets de 8 affichés au fur et à mesure.
         let nouveaux = lus.filter { verdicts[$0.idMessage] == nil }
-        (importants, aFaire) = Resumeur.affichage(lus, verdicts)
+        (importants, aFaire) = Resumeur.affichage(lus, verdicts, traites: traites)
         if nouveaux.isEmpty {
             cleMails = cle
             etatMails = .ok
@@ -525,7 +587,7 @@ final class Etat: ObservableObject {
             do {
                 let v = try await Resumeur.trier(paquet)
                 verdicts.merge(v) { _, n in n }
-                (importants, aFaire) = Resumeur.affichage(lus, verdicts)
+                (importants, aFaire) = Resumeur.affichage(lus, verdicts, traites: traites)
                 triEnCours = max(0, nouveaux.count - k - paquet.count)
                 if !importants.isEmpty { etatMails = .ok }
             } catch {

@@ -417,18 +417,30 @@ final class PageWeb: NSObject, WKNavigationDelegate, NSWindowDelegate {
             guard l.count >= 3, let age = PageWeb.age(l[1]), age <= heures * 3600 else { continue }
             let nom = l[0]
             let mots = Set(plier(nom).split(whereSeparator: { !$0.isLetter }).map(String.init))
-            guard contacts.contains(where: { c in
+            let suivi = contacts.contains(where: { c in
                 plier(c).split(separator: " ").allSatisfy { mots.contains(String($0)) }
-            }), !vus.contains(nom) else { continue }
+            })
             let apercu = l[2...].joined(separator: " ")
-            if apercu.hasPrefix("Vous") { continue }      // c'est lui qui a écrit en dernier
+            if apercu.hasPrefix("Vous") || vus.contains(nom) { continue }      // c'est lui qui a écrit en dernier
+            // Conversation de groupe : l'aperçu commence par le nom de l'auteur (« Alex: Tout le monde… »). Ignorée.
+            // (Teams colle le nom au « : » ; un message privé « Rdv : demain » a une espace avant, il n'est pas pris pour un groupe.)
+            let groupe = PageWeb.groupes(apercu, #"\p{L}[\p{L}'.\-]*(?: \p{L}[\p{L}'.\-]*){0,2}:\s.*"#) != nil
+            if groupe { continue }
+            // Une personne : celles qu'il suit (même déjà lu), et toute autre personne avec un message non lu,
+            // dont le nom ressemble à un nom de personne (2 à 4 mots, sans chiffres, tirets ni émojis : pas « D43 BACKEND »,
+            // « TEAM ASC 2026 🚀 » ou « Entretien … - … »).
+            let personne = PageWeb.groupes(nom, #"\p{L}[\p{L}'\-]*(?: \p{L}[\p{L}'\-]*){1,3}"#) != nil && !nom.contains(" - ")
+            guard suivi || (nonLu && personne), res.count < 6 else { continue }
             vus.insert(nom)
             // Tous ses messages depuis ta dernière réponse (5 au plus), lus dans la conversation, en mode discret.
             var messages = await messagesDepuisTaReponse(de: nom)
             if messages.isEmpty { messages = [apercu] }
             if nonLu { aVerifier[nom] = Date().timeIntervalSince1970 }
             let n = messages.count
-            res.append(Mail(id: premierId + res.count, compte: "Teams", idMessage: "teams:" + nom,
+            // L'identifiant change avec le contenu : un nouveau message refait apparaître la conversation
+            // même si l'ancien a été coché comme traité.
+            let empreinte = messages.joined().unicodeScalars.reduce(UInt32(5381)) { ($0 &* 33) &+ $1.value }
+            res.append(Mail(id: premierId + res.count, compte: "Teams", idMessage: "teams:" + nom + "#" + String(empreinte, radix: 36),
                             expediteur: nom,
                             sujet: (n > 1 ? "\(n) messages Teams" : "Message Teams") + (nonLu ? " (pas lu)" : ""),
                             ilYa: age, corps: messages.joined(separator: "\n")))
