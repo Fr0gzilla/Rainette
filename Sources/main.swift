@@ -110,7 +110,7 @@ enum Ollama {
                     "type": "object",
                     "properties": [
                         "titre": ["type": "string", "description": "Titre court"],
-                        "debut": ["type": "string", "description": "AAAA-MM-JJTHH:MM, ou AAAA-MM-JJ pour une journée entière"],
+                        "debut": ["type": "string", "description": "AAAA-MM-JJTHH:MM si une heure est donnée, sinon AAAA-MM-JJ (journée entière). Jamais d'heure inventée."],
                         "fin": ["type": "string", "description": "AAAA-MM-JJTHH:MM (facultatif, 1 h par défaut)"],
                         "lieu": ["type": "string", "description": "Lieu (facultatif)"],
                     ],
@@ -173,7 +173,9 @@ final class Agenda {
         return store.events(matching: p).sorted { $0.startDate < $1.startDate }
     }
 
-    func ajouter(_ p: Proposition) throws {
+    /// Ajoute l'évènement et renvoie le nom de l'agenda où il a été rangé.
+    @discardableResult
+    func ajouter(_ p: Proposition) throws -> String {
         let e = EKEvent(eventStore: store)
         e.title = p.titre
         e.startDate = p.debut
@@ -182,6 +184,7 @@ final class Agenda {
         e.location = p.lieu
         e.calendar = store.defaultCalendarForNewEvents
         try store.save(e, span: .thisEvent, commit: true)
+        return e.calendar?.title ?? "?"
     }
 }
 
@@ -216,6 +219,13 @@ final class Etat: ObservableObject {
     @Published var bulles: [Bulle] = []
     @Published var reflechit = false
     @Published var proposition: Proposition?
+    /// Les évènements suivants, quand il en a demandé plusieurs d'un coup.
+    private var enAttente: [Proposition] = []
+    private func suivante() {
+        guard !enAttente.isEmpty else { return }
+        proposition = enAttente.removeFirst()
+        dire("Et celui-là, je te le mets ?")
+    }
 
     // Mails
     enum EtatMails: Equatable { case attente, lecture, tri, ok, erreur(String) }
@@ -586,7 +596,12 @@ final class Etat: ObservableObject {
         Nous sommes le \(Fmt.jourLong.string(from: Date())), il est \(Fmt.heure.string(from: Date())).
         Correspondance des prochains jours (utilise-la pour « demain », « jeudi », etc.) :
         \(jours)
-        Pour ajouter un évènement, appelle ajouter_evenement (sans heure de fin : 1 h ; sans heure du tout : journée entière).
+        Pour ajouter un évènement, tu DOIS appeler l'outil ajouter_evenement (sans heure de fin : 1 h). \
+        Sans cet appel, rien n'est ajouté : ne dis JAMAIS « j'ajoute », « je cale » ou « c'est fait » sans l'avoir appelé. \
+        Ne demande pas de confirmation toi-même : la carte de confirmation s'affiche toute seule après l'appel.
+        Si l'utilisateur ne donne PAS d'heure (anniversaire, journée, rappel), mets seulement la date AAAA-MM-JJ : \
+        c'est une journée entière. N'invente jamais d'heure, et ne prends pas l'heure actuelle.
+        Une date sans année désigne la PROCHAINE fois que ce jour arrive (jamais une date déjà passée).
         Pour répondre à une question sur l'agenda, appelle lire_agenda ; sur les mails, appelle lire_mails.
         Quand il veut répondre à un mail (« réponds à … que … »), appelle repondre_mail avec le numéro du mail \
         et son message recopié tel quel, sans le reformuler toi-même. Mails non lus (numéro, expéditeur, objet) :
@@ -601,7 +616,18 @@ final class Etat: ObservableObject {
         bulles.append(Bulle(deMoi: true, texte: t))
         // Démo : l'IA ne voit ni le vrai agenda ni les vrais réglages.
         if Demo.active { dire("C'est le mode démo : je fais semblant 🐸"); return }
+        activite()
+        // Une carte « Je te mets ça ? » attend : « oui / ouai / vas-y » la valide, « non » l'annule.
+        if proposition != nil {
+            let r = t.lowercased().trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
+            if r.range(of: #"^(oui|ouai|ouais|ok|okay|vas-y|vas y|go|yes|carrément|grave|parfait|valide|c'est bon)( .*)?$"#,
+                       options: .regularExpression) != nil { confirmer(); return }
+            if r.range(of: #"^(non|nan|laisse tomber|annule|pas la peine)( .*)?$"#, options: .regularExpression) != nil {
+                annuler(); return
+            }
+        }
         proposition = nil
+        enAttente = []
         historique.append(["role": "user", "content": t])
         // Mémoire courte : on garde les derniers échanges, en repartant d'un message de l'utilisateur.
         if historique.count > 16 {
@@ -618,10 +644,45 @@ final class Etat: ObservableObject {
     private func dire(_ texte: String) {
         bulles.append(Bulle(deMoi: false, texte: texte))
         if bulles.count > 20 { bulles.removeFirst(bulles.count - 20) }
+        activite()
+    }
+
+    // MARK: Effacement de la conversation
+    // Elle disparaît après 3 min sans activité, ou 20 s après qu'il a dit qu'il avait fini (« merci », « c'est bon »…),
+    // sauf si une carte (évènement, réponse) attend encore ou si l'IA réfléchit.
+    private var derniereActivite = Date()
+    private var finAnnoncee = false
+    private var veille: Timer?
+
+    func activite() {
+        derniereActivite = Date()
+        if let t = bulles.last(where: { $0.deMoi })?.texte.lowercased(), bulles.last?.deMoi == true {
+            finAnnoncee = t.range(of: #"^(merci|thx|c'est bon|c bon|ok merci|merci beaucoup|parfait merci|top merci|à plus|a plus|bye|ciao|bonne nuit|c'est tout|rien d'autre)\b"#,
+                                  options: .regularExpression) != nil
+        }
+        if veille == nil {
+            veille = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.effacerSiInactif() }
+            }
+        }
+    }
+
+    private func effacerSiInactif() {
+        guard !bulles.isEmpty, !reflechit, proposition == nil, reponse == nil else { return }
+        let delai: TimeInterval = finAnnoncee ? 20 : 180
+        if Date().timeIntervalSince(derniereActivite) >= delai { effacerConversation() }
+    }
+
+    func effacerConversation() {
+        withAnimation(.easeOut(duration: 0.4)) { bulles = [] }
+        historique = []
+        enAttente = []
+        finAnnoncee = false
     }
 
     private func boucle() async {
-        for _ in 0..<4 {
+        var relance = false
+        for _ in 0..<5 {
             let messages = [["role": "system", "content": consigneSysteme()]] + historique
             let rep: [String: Any]
             do {
@@ -632,8 +693,19 @@ final class Etat: ObservableObject {
             }
             historique.append(rep)
             let appels = rep["tool_calls"] as? [[String: Any]] ?? []
+            var nouvelles: [Proposition] = []
             if appels.isEmpty {
                 let c = (rep["content"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                // Il annonce un ajout au calendrier sans avoir appelé l'outil : rien ne serait ajouté. On le relance une fois.
+                if !relance, proposition == nil,
+                   c.range(of: #"(?i)\b(j'?ajoute|je (te )?(le |la |l')?(cale|mets|rajoute)|c'est (calé|ajouté|noté)|ajouté au calendrier|on cale)"#,
+                           options: .regularExpression) != nil {
+                    relance = true
+                    historique.removeLast()
+                    historique.append(["role": "user", "content": "(Rappel du système : tu n'as pas appelé ajouter_evenement, donc rien n'est ajouté. Appelle l'outil maintenant avec la bonne date.)"])
+                    journal("agenda : le modèle a annoncé un ajout sans appeler l'outil, relance")
+                    continue
+                }
                 dire(c.isEmpty ? "J'ai pas capté, tu peux reformuler ?" : c)
                 return
             }
@@ -658,18 +730,29 @@ final class Etat: ObservableObject {
                 case "lire_agenda":
                     historique.append(["role": "tool", "tool_name": nom, "content": lireAgenda(args)])
                 case "ajouter_evenement":
-                    if let p = proposer(args) {
-                        proposition = p
+                    // Correction du jour de la semaine seulement s'il n'y a qu'un évènement dans ce tour.
+                    let unSeul = appels.filter { (($0["function"] as? [String: Any])?["name"] as? String) == nom }.count == 1
+                    if let p = proposer(args, corrigerJour: unSeul) {
+                        nouvelles.append(p)
                         historique.append(["role": "tool", "tool_name": nom,
                                            "content": "Proposition affichée ; l'utilisateur doit confirmer."])
-                        dire("Je te le mets dans le calendrier ?")
-                        return
+                    } else {
+                        historique.append(["role": "tool", "tool_name": nom,
+                                           "content": "Date illisible : utilise AAAA-MM-JJTHH:MM."])
                     }
-                    historique.append(["role": "tool", "tool_name": nom,
-                                       "content": "Date illisible : utilise AAAA-MM-JJTHH:MM."])
                 default:
                     historique.append(["role": "tool", "tool_name": nom, "content": "Outil inconnu."])
                 }
+            }
+            if !nouvelles.isEmpty {
+                proposition = nouvelles.removeFirst()
+                enAttente = nouvelles
+                for p in [proposition!] + enAttente {
+                    journal("agenda : proposé « \(p.titre) », \(p.resume) — en attente de « Vas-y »")
+                }
+                dire(enAttente.isEmpty ? "Je te le mets dans le calendrier ?"
+                     : "J'en ai \(enAttente.count + 1) à ajouter, on les fait un par un. Je te mets celui-là ?")
+                return
             }
         }
         dire("Je me suis emmêlé les pattes 🐸, tu peux redire autrement ?")
@@ -697,10 +780,35 @@ final class Etat: ObservableObject {
         return lignes.sorted { $0.0 < $1.0 }.map(\.1).joined(separator: "\n")
     }
 
-    private func proposer(_ a: [String: Any]) -> Proposition? {
+    private func proposer(_ a: [String: Any], corrigerJour: Bool = true) -> Proposition? {
         guard let titre = a["titre"] as? String, !titre.isEmpty,
-              let (debut, journee) = (a["debut"] as? String).flatMap(Fmt.lire)
+              let lu = (a["debut"] as? String).flatMap(Fmt.lire)
         else { return nil }
+        var debut = lu.0
+        let journee = lu.1
+        // Une date déjà passée vient presque toujours d'une année mal choisie (« le 17 septembre ») : l'an prochain.
+        let cal = Calendar.current
+        while debut < cal.startOfDay(for: Date()), let d = cal.date(byAdding: .year, value: 1, to: debut) { debut = d }
+        // Le modèle se trompe souvent de jour (« mardi » → un mercredi) : si le message cite un jour de la semaine
+        // et que la date ne tombe pas ce jour-là, on prend le prochain jour de ce nom (en gardant l'heure).
+        let dernier = (historique.last {
+            ($0["role"] as? String) == "user" && !(($0["content"] as? String ?? "").hasPrefix("(Rappel du système"))
+        }?["content"] as? String ?? "").lowercased()
+        let noms = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"]
+        let cites = noms.filter { dernier.range(of: "\\b\($0)\\b", options: .regularExpression) != nil }
+        if corrigerJour, cites.count == 1, !dernier.contains("aujourd"), !dernier.contains("demain"),
+           let voulu = noms.firstIndex(where: { dernier.range(of: "\\b\($0)\\b", options: .regularExpression) != nil }),
+           cal.component(.weekday, from: debut) != voulu + 1 {
+            let h = cal.dateComponents([.hour, .minute], from: debut)
+            var d = cal.startOfDay(for: Date())
+            while cal.component(.weekday, from: d) != voulu + 1 { d = cal.date(byAdding: .day, value: 1, to: d)! }
+            if let avecHeure = cal.date(bySettingHour: h.hour ?? 0, minute: h.minute ?? 0, second: 0, of: d) {
+                // Aujourd'hui mais heure déjà passée (ou « prochain ») : la semaine d'après.
+                let passe = !journee && avecHeure < Date()
+                let prochain = dernier.contains("\(noms[voulu]) prochain") && cal.isDateInToday(d)
+                debut = (passe || prochain) ? cal.date(byAdding: .day, value: 7, to: avecHeure)! : avecHeure
+            }
+        }
         var fin: Date
         if journee {
             fin = Calendar.current.date(byAdding: .day, value: 1, to: debut)!
@@ -716,20 +824,25 @@ final class Etat: ObservableObject {
     func confirmer() {
         guard let p = proposition, !Demo.active else { proposition = nil; return }
         do {
-            try agenda.ajouter(p)
-            dire("✅ C'est calé : \(p.titre), \(p.resume).")
+            let nomAgenda = try agenda.ajouter(p)
+            journal("agenda : ajouté « \(p.titre) », \(p.resume) (agenda « \(nomAgenda) »)")
+            dire("✅ C'est calé : \(p.titre), \(p.resume) (dans ton agenda « \(nomAgenda) »).")
             historique.append(["role": "assistant", "content": "C'est ajouté au calendrier."])
             rafraichir()
         } catch {
+            journal("agenda : échec de l'ajout de « \(p.titre) » : \(error)")
             dire("J'ai pas pu l'ajouter… t'as bien autorisé le calendrier ?")
         }
         proposition = nil
+        suivante()
     }
 
     func annuler() {
+        if let p = proposition { journal("agenda : « \(p.titre) » proposé puis annulé") }
         proposition = nil
         dire("Ok, je laisse tomber.")
         historique.append(["role": "assistant", "content": "Ajout annulé par l'utilisateur."])
+        suivante()
     }
 }
 
@@ -1151,6 +1264,7 @@ struct Widget: View {
                     .font(.system(size: 14))
                     .focused($focus)
                     .onSubmit(envoyer)
+                    .onChange(of: saisie) { _, _ in e.activite() }   // il écrit : on n'efface pas
                 if e.reflechit {
                     ProgressView().controlSize(.small)
                 } else {
