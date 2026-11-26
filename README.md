@@ -20,6 +20,8 @@ Pour l'école, elle va chercher mon emploi du temps sur la plateforme de l'écol
 
 Il y a aussi un coin pour la mer : pour un spot de voile et un spot de surf, elle affiche les conditions du moment, avec les données gratuites d'[Open-Meteo](https://open-meteo.com) : « Top », « Pétole », « Trop gros »… avec le meilleur créneau si ce n'est pas le bon moment.
 
+Chaque matin à 7h, une fenêtre s'ouvre au milieu de l'écran avec le point complet : ce qu'il y a à faire, tous les mails importants, ceux qu'elle a mis de côté (on peut en remonter un), les cours et l'agenda des jours qui viennent. Elle reste là tant que je ne l'ai pas fermée moi-même, et un bouton du widget la rouvre quand je veux.
+
 Le widget reste collé au bureau, sous les fenêtres. On peut le déplacer et le redimensionner depuis son menu, et il s'aligne tout seul sur les widgets de macOS.
 
 ## L'installer

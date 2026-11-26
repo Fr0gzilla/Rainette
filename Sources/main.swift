@@ -494,6 +494,7 @@ final class Etat: ObservableObject {
     func demarrer() async {
         preparerPagesWeb()
         acces = await agenda.demanderAcces()
+        surveillerPointDuJour()
         journal("agenda : accès au calendrier \(acces ? "autorisé" : "REFUSÉ (Réglages Système › Confidentialité › Calendriers)")")
         rafraichirTout()
         NotificationCenter.default.addObserver(
@@ -620,18 +621,37 @@ final class Etat: ObservableObject {
 
     // MARK: Point du matin
 
+    /// Vérifie chaque minute s'il est l'heure du point du jour (7 h) : on relit tout, et le point s'ouvre
+    /// à la fin de la lecture (voir `rafraichirMails`).
+    private var horlogePoint: Timer?
+    func surveillerPointDuJour() {
+        guard horlogePoint == nil, !Demo.active else { return }
+        horlogePoint = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                let jour = Fmt.isoJour.string(from: Date())
+                if Calendar.current.component(.hour, from: Date()) >= 7,
+                   UserDefaults.standard.string(forKey: "RainettePointDuJour") != jour {
+                    self.rafraichir()
+                    await self.rafraichirCours()
+                    await self.rafraichirMails()
+                }
+            }
+        }
+    }
+
     /// Vrai tant que la seule bulle affichée est le point du matin.
     private var pointSeul = false
 
     func pointDuMatinSiBesoin() {
         let jour = Fmt.isoJour.string(from: Date())
         let h = Calendar.current.component(.hour, from: Date())
-        guard !Demo.active, h >= 5, UserDefaults.standard.string(forKey: "RainettePointDuJour") != jour,
-              bulles.isEmpty, proposition == nil, reponse == nil else { return }
+        // À partir de 7 h, une fois par jour (si le Mac dormait à 7 h : dès qu'il se réveille).
+        guard !Demo.active, h >= 7, UserDefaults.standard.string(forKey: "RainettePointDuJour") != jour else { return }
         UserDefaults.standard.set(jour, forKey: "RainettePointDuJour")
-        dire(pointDuMatin())
-        pointSeul = true
-        journal("point du matin affiché")
+        // Le compte rendu complet, dans une fenêtre au centre de l'écran (une fois par jour).
+        CompteRendu.afficher(self)
+        journal("point du jour affiché (fenêtre)")
     }
 
     /// Le point du jour, écrit par le code (rapide et sans erreur) : tâches, cours, agenda, ce qui arrive, la mer.
@@ -1008,9 +1028,13 @@ struct Widget: View {
             Spacer()
             VStack(alignment: .trailing, spacing: 8) {
                 HStack(spacing: 12) {
+                    Button { CompteRendu.afficher(e) } label: { Image(systemName: "list.bullet.rectangle.portrait") }
+                        .buttonStyle(.plain).help("Le point du jour : tout ce que t'as reçu")
                     Button { e.rafraichirTout() } label: { Image(systemName: "arrow.clockwise") }
                         .buttonStyle(.plain).help("Rafraîchir")
                     Menu {
+                        Button("Le point du jour…") { CompteRendu.afficher(e) }
+                        Divider()
                         Button("Brancher ma boîte de l'école…") { e.ecole?.afficher() }
                         Button("Brancher Teams…") { e.teams?.afficher() }
                         Divider()
