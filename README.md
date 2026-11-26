@@ -12,15 +12,21 @@ Je voulais quelque chose qui trie mes mails à ma place sans les envoyer à un s
 
 ## Ce qu'elle sait faire
 
-Elle lit mes mails non lus des trois derniers jours, met de côté les pubs et les newsletters, et me résume le reste en une phrase. Quand un mail demande quelque chose, ça finit dans une petite liste « À faire » que je coche au fur et à mesure.
+Elle lit mes mails non lus des trois derniers jours et fait le tri pour de vrai : les alertes d'emploi automatiques, les pubs, les newsletters et les notifs de réseaux passent à la trappe, et il ne reste que ce qui compte, résumé en une phrase. Quand un mail demande quelque chose, ça finit dans une petite liste « À faire ». Je coche quand c'est fait, et le mail disparaît du widget (avec un « Annuler » pendant quelques secondes, au cas où). Si jamais elle a caché un mail qui comptait, je déroule la liste de ce qu'elle a mis de côté et je le remonte d'un clic.
 
 Je peux aussi lui parler dans la barre du bas. Je lui demande ce que j'ai demain, je lui dis « mets foot jeudi 18h » et elle me propose l'évènement avant de l'ajouter. Pour répondre à un mail, je lui écris vite fait ce que je veux dire, elle me demande si je la veux formelle ou tranquille, et elle me le remet au propre. Rien ne part tant que je n'ai pas cliqué.
 
-Pour l'école, elle va chercher mon emploi du temps sur la plateforme de l'école (une plateforme Pepal) et mes mails dans Outlook web. Elle me dit aussi combien de messages j'ai sur Teams et me montre ceux de quelques personnes que j'ai choisies, sans les marquer comme lus.
+Pour l'école, elle va chercher mon emploi du temps sur la plateforme de l'école (une plateforme Pepal) et mes mails dans Outlook web. Sur Teams, les messages qu'une personne m'envoie directement passent en premier, et les conversations de groupe restent de côté. Elle lit tout ça sans rien marquer comme lu. Et si un rendez-vous tombe en même temps qu'un cours, elle me le signale, y compris au moment où je lui demande de l'ajouter.
 
 Il y a aussi un coin pour la mer : pour un spot de voile et un spot de surf, elle affiche les conditions du moment, avec les données gratuites d'[Open-Meteo](https://open-meteo.com) : « Top », « Pétole », « Trop gros »… avec le meilleur créneau si ce n'est pas le bon moment.
 
-Chaque matin à 7h, une fenêtre s'ouvre au milieu de l'écran avec le point complet : ce qu'il y a à faire, tous les mails importants, ceux qu'elle a mis de côté (on peut en remonter un), les cours et l'agenda des jours qui viennent. Elle reste là tant que je ne l'ai pas fermée moi-même, et un bouton du widget la rouvre quand je veux.
+Chaque matin à 7h, une fenêtre s'ouvre au milieu de l'écran avec le point complet : ce qu'il y a à faire, tous les mails importants, ceux qu'elle a mis de côté, les conversations Teams pas lues, les cours et l'agenda des jours qui viennent. Elle reste là tant que je ne l'ai pas fermée moi-même, et un bouton du widget la rouvre quand je veux.
+
+<p align="center">
+  <img src="docs/point-du-jour.png" alt="Le point du jour : à faire, mails, agenda des jours suivants et conditions en mer" width="720">
+</p>
+
+Et la grenouille n'est pas là que pour la déco : elle cligne des yeux, dort la nuit, sort son parapluie quand il pleut et sourit quand il n'y a plus rien à faire.
 
 Le widget reste collé au bureau, sous les fenêtres. On peut le déplacer et le redimensionner depuis son menu, et il s'aligne tout seul sur les widgets de macOS.
 
@@ -51,11 +57,13 @@ Petite astuce : sans certificat de signature, macOS peut redemander ces autorisa
 
 Pour la lancer à l'ouverture de session, le plus simple est un LaunchAgent qui fait `open` sur `build/Rainette.app` avec `RunAtLoad`.
 
-Pour voir à quoi elle ressemble sans rien brancher, lance-la avec des données inventées (c'est ce mode qui a servi pour les images du dessus, `--demo-discussion` en plus pour la seconde) :
+Pour voir à quoi elle ressemble sans rien brancher, lance-la avec des données inventées (c'est ce mode qui a servi pour les images : `--demo-discussion` ajoute un échange, `--demo-point` ouvre le point du jour) :
 
 ```sh
 build/Rainette.app/Contents/MacOS/Rainette --demo
 ```
+
+Les règles un peu fragiles (dates, tri, lecture de Teams, chevauchements, mer) ont leurs tests : `./tests.sh`.
 
 ## La régler
 
@@ -80,7 +88,7 @@ Si quelque chose ne s'affiche pas, `~/Library/Application Support/Rainette/journ
 
 ## Les limites
 
-Outlook, Teams et l'emploi du temps sont lus directement dans leurs pages web, donc si Microsoft ou la plateforme de l'école changent leur interface, il faudra adapter la lecture. Pour Teams, elle ne voit que l'aperçu du dernier message de chaque conversation. Et tout est en français, l'interface comme les réponses de l'IA.
+Outlook, Teams et l'emploi du temps sont lus directement dans leurs pages web, donc si Microsoft ou la plateforme de l'école changent leur interface, il faudra adapter la lecture. Pour Teams, elle lit les conversations, mais pas les publications dans les équipes ni les mentions. Et tout est en français, l'interface comme les réponses de l'IA.
 
 ## Licence
 

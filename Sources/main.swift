@@ -544,7 +544,10 @@ final class Etat: ObservableObject {
     func majConflits() {
         conflits = Chevauchements.trouver(plagesAVenir())
     }
-    func conflit(_ ev: EKEvent) -> String? { conflits["e:" + (ev.eventIdentifier ?? "")]?.joined(separator: ", ") }
+    func conflit(_ ev: EKEvent) -> String? {
+        guard let id = ev.eventIdentifier, !id.isEmpty else { return nil }   // évènement non enregistré (démo)
+        return conflits["e:" + id]?.joined(separator: ", ")
+    }
     func conflit(_ k: Cours) -> String? { conflits["c:" + k.id]?.joined(separator: ", ") }
 
     private func consigneSysteme() -> String {

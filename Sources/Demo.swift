@@ -68,6 +68,15 @@ extension Etat {
                              periode: 10, dirHoule: 275, eau: 13)])
 
         // Un petit échange dans la discussion
+        // Un chevauchement pour la démo : le dentiste de demain pendant l'anglais à distance.
+        demain = [ev("Dentiste", a(1, 14), a(1, 14, 45))]
+        conflits = Chevauchements.trouver(
+            demain.map { Chevauchements.Plage(cle: "e:" + ($0.eventIdentifier ?? ""), titre: $0.title ?? "", debut: $0.startDate,
+                                              fin: $0.endDate, estCours: false) }
+            + cours.map { Chevauchements.Plage(cle: "c:" + $0.id, titre: $0.matiere, debut: $0.debut, fin: $0.fin, estCours: true) })
+        if CommandLine.arguments.contains("--demo-point") {
+            Task { @MainActor in try? await Task.sleep(for: .seconds(1)); CompteRendu.afficher(self) }
+        }
         if CommandLine.arguments.contains("--demo-discussion") {
             bulles = [
                 Bulle(deMoi: true, texte: "réponds a studio nova que cest ok pour mardi 10h merci"),
