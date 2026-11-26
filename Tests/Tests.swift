@@ -118,5 +118,9 @@ func texte(_ d: Date) -> String {
         verifie(Mer.avisSurf(h(vent: 5, dir: 90, houle: 1.0, periode: 10)).1 == "Bon", "1 m, vent de terre → Bon")
         verifie(Mer.avisSurf(h(vent: 5, houle: 2.6)).1 == "Trop gros", "2,6 m → Trop gros")
         verifie(Mer.avisSurf(h(vent: 15, dir: 270, houle: 1.0)).1 == "Haché", "vent de mer 15 nds → Haché")
+        verifie(Mer.estPluie(code: 61, precipitation: 0), "code 61 (pluie) → parapluie")
+        verifie(Mer.estPluie(code: 3, precipitation: 0.5), "0,5 mm mesurés → parapluie")
+        verifie(!Mer.estPluie(code: 2, precipitation: 0), "nuageux sec → pas de parapluie")
+        verifie(!Mer.estPluie(code: 45, precipitation: 0.1), "brouillard → pas de parapluie")
     }
 }

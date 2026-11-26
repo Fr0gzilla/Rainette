@@ -8,6 +8,7 @@
   "teams": true,
   "contactsTeams": ["Alex Durand", "Sam Petit"],
   "emploiDuTemps": { "nom": "Cours", "adresse": "https://mon-ecole.exemple.fr/emploi-du-temps" },
+  "meteo": [48.85, 2.35],
   "mer": {
     "navigation": { "nom": "Ma plage", "vent": [47.50, -3.00], "mer": [47.45, -3.00] },
     "surf": { "nom": "Mon spot", "vent": [47.40, -3.10], "mer": [47.40, -3.15] }

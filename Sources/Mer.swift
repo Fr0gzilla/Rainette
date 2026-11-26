@@ -55,6 +55,24 @@ enum Mer {
         return (temps, valeurs)
     }
 
+    /// Codes météo WMO de pluie, bruine, averses ou orage (51 à 67, 80 à 82, 95 à 99), ou des précipitations mesurées.
+    static func estPluie(code: Int, precipitation: Double) -> Bool {
+        (51...67).contains(code) || (80...82).contains(code) || (95...99).contains(code) || precipitation >= 0.2
+    }
+
+    /// Il pleut en ce moment au lieu « météo » des réglages (à défaut, le spot de navigation) ?
+    static func pleutIl() async -> Bool {
+        let r = Reglages.actuels
+        guard let lieu = r.meteo ?? r.mer?.navigation?.vent, lieu.count == 2,
+              let url = URL(string: "https://api.open-meteo.com/v1/forecast?latitude=\(lieu[0])&longitude=\(lieu[1])"
+                            + "&current=weather_code,precipitation") else { return false }
+        guard let (data, _) = try? await URLSession.shared.data(from: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let c = json["current"] as? [String: Any] else { return false }
+        return estPluie(code: (c["weather_code"] as? NSNumber)?.intValue ?? 0,
+                        precipitation: (c["precipitation"] as? NSNumber)?.doubleValue ?? 0)
+    }
+
     private static func vent(_ p: (Double, Double)) async throws -> Series {
         try await lire("https://api.open-meteo.com/v1/forecast?latitude=\(p.0)&longitude=\(p.1)"
             + "&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&wind_speed_unit=kn"

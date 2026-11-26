@@ -36,6 +36,9 @@ struct Reglages: Codable {
     var emploiDuTemps: Page?
     /// Spots pour les conditions en mer (Open-Meteo). Absent = pas de ligne mer.
     var mer: Mer?
+    /// [latitude, longitude] du lieu où regarder s'il pleut (la grenouille sort son parapluie).
+    /// Absent = le spot de navigation.
+    var meteo: [Double]?
 
     init() {}
 
@@ -52,6 +55,7 @@ struct Reglages: Codable {
         contactsTeams = try c.decodeIfPresent([String].self, forKey: .contactsTeams) ?? base.contactsTeams
         emploiDuTemps = try c.decodeIfPresent(Page.self, forKey: .emploiDuTemps)
         mer = try c.decodeIfPresent(Mer.self, forKey: .mer)
+        meteo = try c.decodeIfPresent([Double].self, forKey: .meteo)
     }
 
     static var fichier: URL {

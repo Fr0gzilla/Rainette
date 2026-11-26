@@ -70,6 +70,7 @@ Le plus simple est de partir de [`reglages.exemple.json`](reglages.exemple.json)
 - `compteMicrosoft` active Outlook, Teams et la connexion à l'emploi du temps. `contactsTeams` dit de qui lire les messages.
 - `emploiDuTemps` prend l'adresse de la page d'emploi du temps.
 - `mer` prend deux spots, chacun avec un point pour le vent (près de la plage) et un pour la houle (un peu au large).
+- `meteo` est le point `[latitude, longitude]` où regarder s'il pleut, pour que la grenouille sorte son parapluie (par défaut, le spot de voile).
 
 Pour Outlook, Teams et l'emploi du temps, un bouton « Brancher » apparaît dans le widget : tu te connectes une fois et c'est bon. Rainette n'ouvre ensuite ces pages que le temps de les lire, pour ne pas manger de mémoire.
 

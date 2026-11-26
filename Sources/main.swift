@@ -229,6 +229,17 @@ final class Etat: ObservableObject {
 
     // Mer (spots des réglages)
     @Published var mer: Mer.Conditions?
+    /// Il pleut en ce moment (la grenouille sort son parapluie).
+    @Published var ilPleut = false
+
+    /// L'humeur de la grenouille : dort la nuit, parapluie s'il pleut, grand sourire s'il n'y a rien à faire.
+    var humeur: Grenouille.Humeur {
+        let h = Calendar.current.component(.hour, from: Date())
+        if h >= 23 || h < 6 { return .dort }
+        if ilPleut { return .pluie }
+        if etatMails == .ok, aFaire.allSatisfy({ faits.contains($0) }) { return .contente }
+        return .normale
+    }
     @Published var merErreur = false
     private var cleMails = ""
     /// Verdicts de l'IA déjà connus (seuls les nouveaux mails sont triés).
@@ -373,6 +384,7 @@ final class Etat: ObservableObject {
         if Demo.active { return }   // démo : jamais de vraies données
         rafraichir()
         Task {
+            ilPleut = await Mer.pleutIl()
             guard Mer.active else { return }
             do { mer = try await Mer.charger(); merErreur = false } catch { merErreur = mer == nil }
         }
@@ -843,6 +855,7 @@ struct Widget: View {
     @State private var saisie = ""
     @State private var hBulles: CGFloat = 80
     @State private var voirCaches = false
+    @State private var cligne = false
     @FocusState private var focus: Bool
     private let horloge = Timer.publish(every: 1800, on: .main, in: .common).autoconnect()
 
@@ -970,9 +983,21 @@ struct Widget: View {
             ZStack {
                 Circle().fill(or.opacity(0.18))
                 Circle().stroke(or.opacity(0.6), lineWidth: 1)
-                Text("🐸").font(.system(size: 26))
+                Grenouille(style: .pleine, humeur: cligne && [.normale, .pluie].contains(e.humeur) ? .cligne : e.humeur)
+                    .padding(5)
+                    .animation(.easeInOut(duration: 0.25), value: e.humeur)
             }
             .frame(width: 48, height: 48)
+            .help(e.humeur == .dort ? "Chut, je dors" : e.humeur == .pluie ? "Il pleut !" : e.humeur == .contente ? "Rien à faire 🎉" : "Rainette")
+            .task {
+                // Un clignement d'yeux toutes les 3 à 7 secondes.
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(Double.random(in: 3...7)))
+                    cligne = true
+                    try? await Task.sleep(for: .milliseconds(160))
+                    cligne = false
+                }
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text("RAINETTE").font(.system(size: 11, weight: .heavy)).kerning(2).foregroundStyle(or)
                 Text(salutation).font(.system(size: 24, weight: .bold, design: .rounded))
@@ -1258,7 +1283,9 @@ struct Widget: View {
                         VStack(alignment: .leading, spacing: 8) {
                             ForEach(e.bulles) { b in
                                 HStack(alignment: .bottom, spacing: 6) {
-                                    if b.deMoi { Spacer(minLength: 50) } else { Text("🐸").font(.system(size: 14)) }
+                                    if b.deMoi { Spacer(minLength: 50) } else {
+                                        Grenouille(style: .pleine).frame(width: 18, height: 18)
+                                    }
                                     Text(b.texte)
                                         .font(.system(size: 13.5))
                                         .textSelection(.enabled)
